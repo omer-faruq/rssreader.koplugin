@@ -1154,6 +1154,21 @@ function MenuBuilder:new(opts)
     return instance
 end
 
+function MenuBuilder:calculateFolderUnreadCount(node)
+    if not node or not node.children then
+        return 0
+    end
+    local total = 0
+    for _, child in ipairs(node.children) do
+        if child.kind == "feed" then
+            total = total + ((child.feed.ps or 0) + (child.feed.nt or 0))
+        elseif child.kind == "folder" then
+            total = total + self:calculateFolderUnreadCount(child)
+        end
+    end
+    return total
+end
+
 function MenuBuilder:showMenu(menu_instance, reopen_func, opts)
     if menu_instance and self.reader then
         menu_instance._rss_reader = self.reader
@@ -1577,19 +1592,29 @@ function MenuBuilder:showNewsBlurNode(account, client, node)
     local entries = {}
     for _, child in ipairs(children) do
         if child.kind == "folder" then
+            local unread_count = self:calculateFolderUnreadCount(child)
+            local display_title = child.title or _("Untitled folder")
+            if unread_count > 0 then
+                display_title = display_title .. " (" .. tostring(unread_count) .. ")"
+            end
             local normal_callback = function()
                 self:showNewsBlurNode(account, client, child)
             end
             table.insert(entries, {
-                text = child.title or _("Untitled folder"),
+                text = display_title,
                 callback = normal_callback,
             })
         elseif child.kind == "feed" then
+            local unread_count = (child.feed.ps or 0) + (child.feed.nt or 0)
+            local display_title = child.title or _("Untitled feed")
+            if unread_count > 0 then
+                display_title = display_title .. " (" .. tostring(unread_count) .. ")"
+            end
             local normal_callback = function()
                 self:showNewsBlurFeed(account, client, child)
             end
             table.insert(entries, {
-                text = child.title or _("Untitled feed"),
+                text = display_title,
                 callback = normal_callback,
             })
         end
@@ -1845,8 +1870,13 @@ function MenuBuilder:showCommaFeedNode(account, client, node)
             local normal_callback = function()
                 self:showCommaFeedFeed(account, client, child)
             end
+            local unread_count = child.feed.unreadCount or 0
+            local display_title = child.title or _("Untitled feed")
+            if unread_count > 0 then
+                display_title = display_title .. " (" .. tostring(unread_count) .. ")"
+            end
             table.insert(entries, {
-                text = child.title or _("Untitled feed"),
+                text = display_title,
                 callback = normal_callback,
             })
         end

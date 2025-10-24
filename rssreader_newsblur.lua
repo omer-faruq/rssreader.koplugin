@@ -317,12 +317,12 @@ function NewsBlur:fetchSubscriptions(force)
         return true, self.subscriptions_cache
     end
     local ok, data_or_err = self:authorizedRequest({
-        url = self.BASE_URL .. self.SUBSCRIPTION_ENDPOINT,
-        method = "POST",
-        body = encodeForm({
+        url = self.BASE_URL .. self.SUBSCRIPTION_ENDPOINT .. "?" .. encodeForm({
             flat = "false",
             include_favicons = "false",
+            update_counts = "true",
         }),
+        method = "GET",
     })
     if not ok then
         return false, data_or_err
