@@ -708,7 +708,7 @@ function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
         if next_index then
             self:showStory(stories, next_index, function(next_action, next_payload)
                 self:handleStoryAction(stories, next_index, next_action, next_payload, context)
-            end, nil, context)
+            end, nil, nil, context)
         end
         return
     end
@@ -720,7 +720,7 @@ function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
         if next_index then
             self:showStory(stories, next_index, function(next_action, next_payload)
                 self:handleStoryAction(stories, next_index, next_action, next_payload, context)
-            end, nil, context)
+            end, nil, nil, context)
         else
             UIManager:show(InfoMessage:new{ text = _("No unread stories found.") })
         end
