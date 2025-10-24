@@ -739,16 +739,12 @@ function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
 
     if action == "mark_read" then
         if story then
-            logger.warn("DEBUG: mark_read called for story", story.id or story.title)
             setStoryReadState(story, true)
             self:_updateStoryEntry(context, stories, index)
             self:_updateFeedCache(context)
             if context and context.client and context.feed_id and type(context.client.markStoryAsRead) == "function" then
-                logger.warn("DEBUG: calling API markStoryAsRead for feed", context.feed_id)
                 NetworkMgr:runWhenOnline(function()
-                    logger.warn("DEBUG: inside runWhenOnline, calling API")
                     local ok, err_or_data = context.client:markStoryAsRead(context.feed_id, story)
-                    logger.warn("DEBUG: API call result", ok, err_or_data)
                     if not ok then
                         setStoryReadState(story, false)
                         self:_updateStoryEntry(context, stories, index)
@@ -756,8 +752,6 @@ function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
                         UIManager:show(InfoMessage:new{ text = err_or_data or _("Failed to update story state."), timeout = 3 })
                     end
                 end)
-            else
-                logger.warn("DEBUG: API call skipped - context.client:", context and context.client, "feed_id:", context and context.feed_id, "markStoryAsRead:", context and context.client and type(context.client.markStoryAsRead))
             end
         end
         return
@@ -1266,6 +1260,7 @@ function MenuBuilder:showLocalFeed(feed, opts)
             menu_instance = Menu:new{
                 title = feed_node.title or _("Feed"),
                 item_table = entries,
+                multilines_forced = true,
             }
             menu_instance._rss_feed_node = feed_node
             ensureMenuCloseHook(menu_instance)
@@ -1702,6 +1697,7 @@ function MenuBuilder:showNewsBlurFeed(account, client, feed_node, opts)
             menu_instance = Menu:new{
                 title = feed_node.title or (account and account.name) or _("NewsBlur"),
                 item_table = entries,
+                multilines_forced = true,
             }
             menu_instance._rss_feed_node = feed_node
             ensureMenuCloseHook(menu_instance)
@@ -1956,6 +1952,7 @@ function MenuBuilder:showCommaFeedFeed(account, client, feed_node, opts)
             menu_instance = Menu:new{
                 title = feed_node.title or (account and account.name) or _("CommaFeed"),
                 item_table = entries,
+                multilines_forced = true,
             }
             menu_instance._rss_feed_node = feed_node
             ensureMenuCloseHook(menu_instance)

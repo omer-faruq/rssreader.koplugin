@@ -41,6 +41,35 @@ local function replaceRightSingleQuoteEntities(text)
     return replaced
 end
 
+local function formatStoryDate(story)
+    if type(story) ~= "table" then
+        return nil
+    end
+    local timestamp = story.timestamp or story.created_on_time or story.date
+    if not timestamp then
+        return nil
+    end
+    if type(timestamp) == "string" then
+        local numeric = tonumber(timestamp)
+        if numeric then
+            timestamp = numeric
+        else
+            return timestamp
+        end
+    end
+    if type(timestamp) ~= "number" then
+        return nil
+    end
+    if timestamp > 10000 then
+        timestamp = timestamp / 1000
+    end
+    local ok, formatted = pcall(os.date, "%Y-%m-%d", timestamp)
+    if ok then
+        return formatted
+    end
+    return nil
+end
+
 local function sanitizeHtml(html)
     if type(html) ~= "string" or html == "" then
         return nil
@@ -253,6 +282,19 @@ function StoryViewer:showStory(story, on_action, on_close, options)
         self:_showFallback(story, on_action, on_close, options)
         return
     end
+
+    -- Add H3 title at the beginning of HTML content with author and date
+    local title = replaceRightSingleQuoteEntities(story.story_title or story.title or DEFAULT_STORY_TITLE)
+    local author = story.author or story.creator
+    if author then
+        author = replaceRightSingleQuoteEntities(author)
+        title = title .. " - " .. author
+    end
+    local date_str = formatStoryDate(story)
+    if date_str then
+        title = title .. " - " .. date_str
+    end
+    html = "<h3>" .. title .. "</h3>" .. html
 
     local temp_file = writeHtmlToTempFile(html)
     if not temp_file then
