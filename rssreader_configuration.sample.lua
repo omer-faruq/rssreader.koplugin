@@ -32,5 +32,6 @@ return {
     },
     features = {
         default_folder_on_save = nil, -- set a folder to save new feeds to, if nil then default is home folder
+        use_fivefilters_on_save_open = true, --try to use fivefilters on save and open a website to sanitize it
     },
 }

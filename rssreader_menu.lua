@@ -45,6 +45,38 @@ local function replaceRightSingleQuoteEntities(text)
     return replaced
 end
 
+local function hasLikelyXmlStructure(content)
+    if type(content) ~= "string" then
+        return false
+    end
+    local trimmed = content:gsub("^[%s%c]+", ""):gsub("[%s%c]+$", "")
+    if trimmed == "" then
+        return false
+    end
+    if trimmed:sub(1, 1) ~= "<" then
+        return false
+    end
+    if trimmed:find("<item", 1, true) or trimmed:find("<entry", 1, true) then
+        return true
+    end
+    if trimmed:find("<rss", 1, true) or trimmed:find("<feed", 1, true) then
+        return true
+    end
+    return false
+end
+
+local function fiveFiltersContentIsMeaningful(html)
+    if type(html) ~= "string" then
+        return false
+    end
+    local trimmed = html:gsub("^[%s%c]+", ""):gsub("[%s%c]+$", "")
+    if trimmed == "" then
+        return false
+    end
+    local minimum_length = 200
+    return trimmed:len() >= minimum_length
+end
+
 local function findNextIndex(stories, start_index, predicate)
     if not stories or #stories == 0 then
         return nil
@@ -449,7 +481,129 @@ local function rewriteRelativeResourceUrls(html, page_url)
     return html
 end
 
-local function fetchStoryContent(story, on_complete, options)
+local function shouldUseFiveFilters(builder)
+    if not builder or not builder.accounts or not builder.accounts.config then
+        return false
+    end
+    local flag = util.tableGetValue(builder.accounts.config, "features", "use_fivefilters_on_save_open")
+    if flag == nil then
+        return false
+    end
+    return flag and true or false
+end
+
+local function buildFiveFiltersUrl(link)
+    if type(link) ~= "string" or link == "" then
+        return nil
+    end
+    local encoded = util.urlEncode(link)
+    if not encoded or encoded == "" then
+        return nil
+    end
+    return string.format("https://ftr.fivefilters.net/makefulltextfeed.php?step=3&fulltext=1&url=%s&max=3&links=preserve&exc=1&submit=Create+Feed", encoded)
+end
+
+local function detectFiveFiltersBlocked(content)
+    if type(content) ~= "string" then
+        return false
+    end
+    return content:find("URL blocked", 1, true) ~= nil
+end
+
+local function extractFiveFiltersHtml(xml_content)
+    if type(xml_content) ~= "string" or xml_content == "" then
+        return nil
+    end
+
+    local item_block = xml_content:match("<item[^>]*>(.-)</item>")
+    if not item_block then
+        return nil
+    end
+
+    local function extractTagContent(block, tag)
+        local pattern = string.format("<%s[^>]*>(.-)</%s>", tag, tag)
+        local value = block:match(pattern)
+        if not value then
+            return nil
+        end
+        value = value:gsub("^%s+", ""):gsub("%s+$", "")
+        local cdata = value:match("^<!%[CDATA%[(.*)%]%]>$")
+        if cdata then
+            value = cdata
+        end
+        return value
+    end
+
+    local title_text = util.htmlEntitiesToUtf8(extractTagContent(item_block, "title") or "")
+    local description_text = extractTagContent(item_block, "description") or ""
+
+    if description_text == "" then
+        return nil
+    end
+
+    description_text = util.htmlEntitiesToUtf8(description_text)
+    description_text = description_text:gsub("&lt;", "<"):gsub("&gt;", ">")
+
+    local placeholder_marker = "[unable to retrieve full-text content]"
+    if description_text:lower():find(placeholder_marker, 1, true) then
+        return nil
+    end
+
+    local fragments = {}
+    if title_text ~= "" then
+        table.insert(fragments, string.format("<h3>%s</h3>", title_text))
+    end
+    table.insert(fragments, description_text)
+    return table.concat(fragments, "")
+end
+
+local function rewriteFiveFiltersHtml(html)
+    if type(html) ~= "string" or html == "" then
+        return nil
+    end
+    local trimmed = html:gsub("^[%s%c]+", ""):gsub("[%s%c]+$", "")
+    if trimmed == "" then
+        return nil
+    end
+    return trimmed
+end
+
+local function fetchViaHttp(link, on_complete)
+    local sink = {}
+    socketutil:set_timeout(socketutil.LARGE_BLOCK_TIMEOUT, socketutil.LARGE_TOTAL_TIMEOUT)
+    local ok, status_code, _, status_text = http.request{
+        url = link,
+        method = "GET",
+        sink = ltn12.sink.table(sink),
+        headers = {
+            ["Accept-Encoding"] = "identity",
+            ["User-Agent"] = "KOReader RSSReader",
+        },
+    }
+    socketutil:reset_timeout()
+
+    if not ok or tostring(status_code):sub(1, 1) ~= "2" then
+        logger.warn("RSSReader", "Failed to download story", link, status_text or status_code)
+        if on_complete then
+            on_complete(nil, status_text or status_code or "download_failed")
+        end
+        return
+    end
+
+    local content = table.concat(sink)
+    if not content or content == "" then
+        if on_complete then
+            on_complete(nil, "empty_content")
+        end
+        return
+    end
+
+    if on_complete then
+        on_complete(content)
+    end
+end
+
+local function fetchStoryContent(story, builder, on_complete, options)
     local link = story and (story.permalink or story.href or story.link)
     if not link or link == "" then
         if on_complete then
@@ -465,50 +619,71 @@ local function fetchStoryContent(story, on_complete, options)
 
     NetworkMgr:runWhenOnline(function()
         UIManager:nextTick(function()
-            local sink = {}
-            socketutil:set_timeout(socketutil.LARGE_BLOCK_TIMEOUT, socketutil.LARGE_TOTAL_TIMEOUT)
-            local ok, status_code, _, status_text = http.request{
-                url = link,
-                method = "GET",
-                sink = ltn12.sink.table(sink),
-                headers = {
-                    ["Accept-Encoding"] = "identity",
-                    ["User-Agent"] = "KOReader RSSReader",
-                },
-            }
-            socketutil:reset_timeout()
+            local use_fivefilters = shouldUseFiveFilters(builder)
 
-            if not ok or tostring(status_code):sub(1, 1) ~= "2" then
-                logger.warn("RSSReader", "Failed to download story", link, status_text or status_code)
-                if on_complete then
-                    on_complete(nil, status_text or status_code or "download_failed")
-                end
+            local function handleOriginalDownload()
+                fetchViaHttp(link, function(content, err)
+                    if not content then
+                        if on_complete then
+                            on_complete(nil, err)
+                        end
+                        return
+                    end
+                    content = rewriteRelativeResourceUrls(content, link)
+                    content = HtmlSanitizer.disableFontSizeDeclarations(content)
+                    if on_complete then
+                        on_complete(content)
+                    end
+                end)
+            end
+
+            if not use_fivefilters then
+                handleOriginalDownload()
                 return
             end
 
-            local content = table.concat(sink)
-            if not content or content == "" then
-                if on_complete then
-                    on_complete(nil, "empty_content")
-                end
+            local fivefilters_url = buildFiveFiltersUrl(link)
+            if not fivefilters_url then
+                handleOriginalDownload()
                 return
             end
 
-            content = rewriteRelativeResourceUrls(content, link)
-            content = HtmlSanitizer.disableFontSizeDeclarations(content)
-            if on_complete then
-                on_complete(content)
-            end
+            fetchViaHttp(fivefilters_url, function(content, err)
+                if not content then
+                    handleOriginalDownload()
+                    return
+                end
+
+                if not hasLikelyXmlStructure(content) then
+                    handleOriginalDownload()
+                    return
+                end
+
+                if detectFiveFiltersBlocked(content) then
+                    handleOriginalDownload()
+                    return
+                end
+
+                local fivefilters_html = rewriteFiveFiltersHtml(extractFiveFiltersHtml(content))
+                if not fivefilters_html or not fiveFiltersContentIsMeaningful(fivefilters_html) then
+                    handleOriginalDownload()
+                    return
+                end
+
+                if on_complete then
+                    on_complete(fivefilters_html)
+                end
+            end)
         end)
     end)
 end
 
-local function downloadStoryToCache(story, on_complete)
+local function downloadStoryToCache(story, builder, on_complete)
     local cache_dir = buildCacheDirectory()
     local filename = safeFilenameFromStory(story)
     local target_path = cache_dir .. "/" .. filename
 
-    fetchStoryContent(story, function(content, err)
+    fetchStoryContent(story, builder, function(content, err)
         if not content then
             if on_complete then
                 on_complete(nil, err)
@@ -516,15 +691,12 @@ local function downloadStoryToCache(story, on_complete)
             return
         end
 
-        local file = io.open(target_path, "wb")
-        if not file then
+        if not writeStoryHtmlFile(content, target_path) then
             if on_complete then
                 on_complete(nil, "write_error")
             end
             return
         end
-        file:write(content)
-        file:close()
 
         FileManager:openFile(target_path)
         if on_complete then
@@ -701,7 +873,7 @@ function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
     if action == "go_to_link" then
         local story = payload or stories[index]
         normalizeStoryLink(story)
-        downloadStoryToCache(story, function(path, err)
+        downloadStoryToCache(story, self, function(path, err)
             if err then
                 local link = story and (story.permalink or story.href or story.link)
                 if link then
@@ -801,7 +973,7 @@ function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
         normalizeStoryLink(target_story)
         UIManager:show(InfoMessage:new{ text = _("Saving story..."), timeout = 1 })
 
-        fetchStoryContent(target_story, function(content, err)
+        fetchStoryContent(target_story, self, function(content, err)
             if not content then
                 UIManager:show(InfoMessage:new{ text = _("Failed to download story."), timeout = 3 })
                 return
