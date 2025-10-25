@@ -294,7 +294,22 @@ function StoryViewer:showStory(story, on_action, on_close, options)
 
     -- Add H3 title at the beginning of HTML content with author and date
     local title = replaceRightSingleQuoteEntities(story.story_title or story.title or DEFAULT_STORY_TITLE)
-    local author = story.author or story.creator
+    local raw_author = story.author or story.creator
+    local author
+    if type(raw_author) == "function" then
+        local ok, value = pcall(raw_author, story)
+        if ok then
+            raw_author = value
+        else
+            raw_author = nil
+        end
+    end
+    if type(raw_author) == "table" then
+        raw_author = table.concat(raw_author, ", ")
+    end
+    if type(raw_author) == "string" and raw_author ~= "" then
+        author = raw_author
+    end
     if author then
         author = replaceRightSingleQuoteEntities(author)
         title = title .. " - " .. author
