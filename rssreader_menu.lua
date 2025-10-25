@@ -595,7 +595,17 @@ function MenuBuilder:showStory(stories, index, on_action, on_close, options, con
             self:handleStoryAction(stories, index, "mark_read", story, context)
         end
     end
-    local disable_mutators = options and options.disable_story_mutators or (context and context.feed_type == "local")
+    local is_api_context = false
+    if context and (context.feed_type == "newsblur" or context.feed_type == "commafeed") then
+        is_api_context = true
+    end
+
+    local disable_mutators = false
+    if context and context.feed_type == "local" then
+        disable_mutators = true
+    elseif options and options.disable_story_mutators and not is_api_context then
+        disable_mutators = true
+    end
     self.story_viewer:showStory(story, function(action, payload)
         self:handleStoryAction(stories, index, action, payload, context)
     end, function()
@@ -622,6 +632,7 @@ function MenuBuilder:showStory(stories, index, on_action, on_close, options, con
         end
     end, {
         disable_story_mutators = disable_mutators,
+        is_api_version = is_api_context,
     })
 end
 
@@ -1256,7 +1267,7 @@ function MenuBuilder:showLocalFeed(feed, opts)
                 callback = function()
                     self:showStory(stories, index, function(action, payload)
                         self:handleStoryAction(stories, index, action, payload, context)
-                    end, nil, context)
+                    end, nil, nil, context)
                 end,
             })
         end

@@ -99,9 +99,17 @@ end
 local function buildToolbarButtons(story, on_action, close_handler, include_close, options)
     local rows = {}
     if on_action then
-        local disable_mutators = true  -- Temporarily force disable
+        local disable_mutators = false  -- Temporarily force disable
+        if options then
+            if options.is_api_version then
+                disable_mutators = false
+            elseif options.disable_story_mutators then
+                disable_mutators = true
+            end
+        end
+        local temprorary_disabled = true
         local first_row = {}
-        if not disable_mutators then
+        if not disable_mutators and not temprorary_disabled then
             table.insert(first_row, {
                 text = _("Mark as unread"),
                 callback = function()
@@ -234,6 +242,7 @@ function StoryViewer:_showFallback(story, on_action, on_close, options)
     local button_options = {
         include_save = true,
         disable_story_mutators = options and options.disable_story_mutators,
+        is_api_version = options and options.is_api_version,
     }
     local buttons = on_action and buildToolbarButtons(story, on_action, closeViewer, false, button_options) or nil
 
@@ -325,6 +334,7 @@ function StoryViewer:showStory(story, on_action, on_close, options)
     local button_rows = buildToolbarButtons(story, on_action, closeAll, true, {
         include_save = true,
         disable_story_mutators = options and options.disable_story_mutators,
+        is_api_version = options and options.is_api_version,
     })
     local button_table = ButtonTable:new{
         width = width,
