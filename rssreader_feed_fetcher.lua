@@ -46,6 +46,61 @@ local function sanitize(value)
     return util.htmlEntitiesToUtf8(value)
 end
 
+local function decodeAtomBody(body, attrs)
+    if not body then
+        return nil
+    end
+    body = stripCData(body)
+    if not body or body == "" then
+        return nil
+    end
+
+    local type_attr
+    if attrs then
+        type_attr = attrs:match('[Tt][Yy][Pp][Ee]%s*=%s*["\'](.-)["\']')
+        if type_attr then
+            type_attr = type_attr:lower()
+        end
+    end
+
+    if not type_attr or type_attr == "text" then
+        local escaped = util.htmlEscape(util.htmlEntitiesToUtf8(body))
+        return string.format("<p>%s</p>", escaped)
+    elseif type_attr == "html" then
+        return util.htmlEntitiesToUtf8(body)
+    elseif type_attr == "xhtml" then
+        return body
+    else
+        return util.htmlEntitiesToUtf8(body)
+    end
+end
+
+local function extractAtomLink(raw)
+    local fallback
+    for attrs in raw:gmatch("<link%s+([^>]-)/?>") do
+        local href = attrs:match('href%s*=%s*["\'](.-)["\']')
+        if href and href ~= "" then
+            href = util.htmlEntitiesToUtf8(stripCData(href))
+            local rel = attrs:match('rel%s*=%s*["\'](.-)["\']')
+            local type_attr = attrs:match('type%s*=%s*["\'](.-)["\']')
+            local rel_lower = rel and rel:lower() or nil
+            local type_lower = type_attr and type_attr:lower() or nil
+
+            if not rel_lower or rel_lower == "alternate" then
+                if not type_lower or type_lower == "text/html" or type_lower == "html" then
+                    return href
+                end
+                if not fallback then
+                    fallback = href
+                end
+            elseif not fallback then
+                fallback = href
+            end
+        end
+    end
+    return fallback
+end
+
 local function parseRSS(content)
     local items = {}
     for raw in content:gmatch("<item[%s>](.-)</item>") do
@@ -77,10 +132,10 @@ local function parseAtom(content)
     local items = {}
     for raw in content:gmatch("<entry[%s>](.-)</entry>") do
         local title = sanitize(raw:match("<title[^>]*>(.-)</title>"))
-        local link = raw:match("<link[^>]+href%=(['\"])(.-)%1")
-        local contentHtml = raw:match("<content[^>]*>(.-)</content>")
-        local summary = raw:match("<summary[^>]*>(.-)</summary>")
-        local body = contentHtml or summary
+        local link = extractAtomLink(raw)
+        local content_attrs, content_body = raw:match("<content([^>]*)>(.-)</content>")
+        local summary_attrs, summary_body = raw:match("<summary([^>]*)>(.-)</summary>")
+        local body = decodeAtomBody(content_body, content_attrs) or decodeAtomBody(summary_body, summary_attrs)
         local pub_date = stripCData(raw:match("<updated[^>]*>(.-)</updated>"))
             or stripCData(raw:match("<published[^>]*>(.-)</published>"))
         if pub_date then
