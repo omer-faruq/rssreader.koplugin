@@ -789,9 +789,7 @@ function MenuBuilder:showStory(stories, index, on_action, on_close, options, con
     end
 
     local disable_mutators = false
-    if context and context.feed_type == "local" then
-        disable_mutators = true
-    elseif options and options.disable_story_mutators and not is_api_context then
+    if options and options.disable_story_mutators and not is_api_context then
         disable_mutators = true
     end
     self.story_viewer:showStory(story, function(action, payload)
