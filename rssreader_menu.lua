@@ -422,8 +422,17 @@ local function buildCacheDirectory()
     return base_dir
 end
 
+local function sanitizeFiveFiltersHtml(html)
+    if type(html) ~= "string" or html == "" then
+        return html
+    end
+    html = html:gsub("%s*<p>%s*<strong>%s*<a%s+href=\"https://blockads%.fivefilters%.org\">Adblock%s+test</a>%s*</strong>%s*<a%s+href=\"https://blockads%.fivefilters%.org/acceptable%.html\">%(Why%?%)</a>%s*</p>%s*", "")
+    return html
+end
+
 local function writeStoryHtmlFile(html, filepath)
     if type(html) == "string" and html ~= "" then
+        html = sanitizeFiveFiltersHtml(html)
         html = HtmlSanitizer.disableFontSizeDeclarations(html)
     end
     local file = io.open(filepath, "w")
