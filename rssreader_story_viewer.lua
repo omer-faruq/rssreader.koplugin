@@ -133,7 +133,10 @@ local function buildToolbarButtons(story, on_action, close_handler, include_clos
             {
                 text = _("Open"),
                 callback = function()
-                    on_action("go_to_link", story)
+                    on_action("go_to_link", {
+                        story = story,
+                        close_story = close_handler,
+                    })
                 end,
                 disabled = not story.permalink,
             },

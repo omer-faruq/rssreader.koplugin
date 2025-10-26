@@ -920,11 +920,30 @@ end
 function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
     local story = stories and stories[index]
     if action == "go_to_link" then
-        local story = payload or stories[index]
-        normalizeStoryLink(story)
-        downloadStoryToCache(story, self, function(path, err)
+        local payload_table = type(payload) == "table" and payload or {}
+        local target_story = payload_table.story or story
+        normalizeStoryLink(target_story)
+
+        local function closeCurrentStory()
+            if type(payload_table.close_story) == "function" then
+                payload_table.close_story()
+            end
+        end
+
+        local function closeActiveMenu()
+            local reader = self.reader
+            if reader and reader.current_menu_info and reader.current_menu_info.menu then
+                UIManager:close(reader.current_menu_info.menu)
+                reader.current_menu_info = nil
+            end
+        end
+
+        closeCurrentStory()
+        closeActiveMenu()
+
+        downloadStoryToCache(target_story, self, function(path, err)
             if err then
-                local link = story and (story.permalink or story.href or story.link)
+                local link = target_story and (target_story.permalink or target_story.href or target_story.link)
                 if link then
                     UIManager:show(InfoMessage:new{ text = string.format(_("Opening: %s"), link) })
                 end
