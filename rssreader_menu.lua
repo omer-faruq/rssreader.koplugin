@@ -26,6 +26,7 @@ local LocalStore = require("rssreader_local_store")
 local StoryViewer = require("rssreader_story_viewer")
 local FeedFetcher = require("rssreader_feed_fetcher")
 local HtmlSanitizer = require("rssreader_html_sanitizer")
+local LocalReadState
 
 local MenuBuilder = {}
 MenuBuilder.__index = MenuBuilder
@@ -239,7 +240,22 @@ local function storyUniqueKey(story)
     if type(story) ~= "table" then
         return nil
     end
-    return story.story_hash or story.hash or story.guid or story.story_id or story.id
+    local key = story.story_hash
+        or story.hash
+        or story.guid
+        or story.story_id
+        or story.id
+        or story.permalink
+        or story.href
+        or story.link
+    if not key and story.story_title then
+        local suffix = story.date or story.timestamp or story.created_on_time or ""
+        key = string.format("%s::%s", story.story_title, tostring(suffix))
+    end
+    if key == nil then
+        return nil
+    end
+    return tostring(key)
 end
 
 local function appendUniqueStory(storage, key_map, story)
@@ -925,6 +941,16 @@ function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
             setStoryReadState(story, true)
             self:_updateStoryEntry(context, stories, index)
             self:_updateFeedCache(context)
+            if context and context.feed_type == "local" then
+                local feed_identifier = context.feed_identifier or (context.feed_node and (context.feed_node.url or context.feed_node.id))
+                if feed_identifier and story._rss_local_key then
+                    context.local_read_map = context.local_read_map or {}
+                    context.local_read_map = self.local_read_state.markRead(feed_identifier, story._rss_local_key, context.local_read_map)
+                    if context.feed_node then
+                        context.feed_node._rss_local_read_map = context.local_read_map
+                    end
+                end
+            end
             if context and context.client and context.feed_id and type(context.client.markStoryAsRead) == "function" then
                 NetworkMgr:runWhenOnline(function()
                     local ok, err_or_data = context.client:markStoryAsRead(context.feed_id, story)
@@ -955,6 +981,16 @@ function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
                         UIManager:show(InfoMessage:new{ text = err_or_data or _("Failed to update story state."), timeout = 3 })
                     end
                 end)
+            end
+            if context and context.feed_type == "local" then
+                local feed_identifier = context.feed_identifier or (context.feed_node and (context.feed_node.url or context.feed_node.id))
+                if feed_identifier and story._rss_local_key then
+                    context.local_read_map = context.local_read_map or {}
+                    context.local_read_map = self.local_read_state.markUnread(feed_identifier, story._rss_local_key, context.local_read_map)
+                    if context.feed_node then
+                        context.feed_node._rss_local_read_map = context.local_read_map
+                    end
+                end
             end
             self:_updateStoryEntry(context, stories, index)
             self:_updateFeedCache(context)
@@ -1331,6 +1367,10 @@ function MenuBuilder:new(opts)
     local options = opts or {}
     local instance = setmetatable({}, MenuBuilder)
     instance.local_store = options.local_store or LocalStore:new()
+    if not instance.local_read_state then
+        LocalReadState = LocalReadState or require("rssreader_local_readstate")
+    end
+    instance.local_read_state = LocalReadState
     instance.accounts = options.accounts
     instance.reader = options.reader
     instance.story_viewer = options.story_viewer or StoryViewer:new()
@@ -1408,6 +1448,44 @@ function MenuBuilder:showLocalFeed(feed, opts)
         end
     end
 
+    local feed_identifier = feed_node.url or feed.url or feed_node.id or feed_node.title or "local_feed"
+    local read_map = feed_node._rss_local_read_map
+    if not read_map then
+        local loaded_map = self.local_read_state.load(feed_identifier)
+        if type(loaded_map) ~= "table" then
+            read_map = {}
+        else
+            read_map = loaded_map
+        end
+        feed_node._rss_local_read_map = read_map
+    end
+
+    local function applyLocalReadState()
+        local stories = feed_node._rss_stories or {}
+        if type(read_map) ~= "table" then
+            read_map = {}
+        end
+        local valid_keys = {}
+        for _, story in ipairs(stories) do
+            normalizeStoryReadState(story)
+            local key = storyUniqueKey(story)
+            if key then
+                story._rss_local_key = key
+                if read_map[key] then
+                    setStoryReadState(story, true)
+                else
+                    setStoryReadState(story, false)
+                end
+                table.insert(valid_keys, key)
+            else
+                story._rss_local_key = nil
+                setStoryReadState(story, false)
+            end
+        end
+        read_map = self.local_read_state.prune(feed_identifier, read_map, valid_keys)
+        feed_node._rss_local_read_map = read_map
+    end
+
     local function finalizeMenu()
         local stories = feed_node._rss_stories or {}
         if #stories == 0 then
@@ -1421,6 +1499,8 @@ function MenuBuilder:showLocalFeed(feed, opts)
             feed_type = "local",
             feed = feed,
             feed_node = feed_node,
+            feed_identifier = feed_identifier,
+            local_read_map = read_map,
             refresh = function()
                 self:showLocalFeed(feed, {
                     account_name = account_name,
@@ -1431,11 +1511,14 @@ function MenuBuilder:showLocalFeed(feed, opts)
         }
 
         local entries = {}
+        applyLocalReadState()
         for index, story in ipairs(stories) do
             normalizeStoryReadState(story)
             normalizeStoryLink(story)
+            local entry_is_unread = isUnread(story)
             table.insert(entries, {
-                text = decoratedStoryTitle(story, false),
+                text = decoratedStoryTitle(story, true),
+                bold = entry_is_unread,
                 callback = function()
                     self:showStory(stories, index, function(action, payload)
                         self:handleStoryAction(stories, index, action, payload, context)
@@ -1515,6 +1598,7 @@ function MenuBuilder:showLocalFeed(feed, opts)
         feed_node._rss_menu_page = previous_menu_page
         feed_node.title = feed.title or _("Feed")
 
+        applyLocalReadState()
         finalizeMenu()
     end)
 end
