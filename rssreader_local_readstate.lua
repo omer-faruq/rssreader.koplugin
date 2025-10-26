@@ -5,7 +5,7 @@ local sha2 = require("ffi/sha2")
 
 local LocalReadState = {}
 
-local BASE_DIR = DataStorage:getDataDir() .. "/cache/rssreader_local_log"
+local BASE_DIR = DataStorage:getDataDir() .. "/data/rssreader_local_log"
 
 local function ensureBaseDir()
     util.makePath(BASE_DIR)
@@ -25,12 +25,22 @@ local function buildFilename(feed_identifier)
     if type(identifier) ~= "string" or identifier == "" then
         identifier = tostring(identifier or "local_feed")
     end
-    local safe_name = util.getSafeFilename(identifier, base_dir, 120, 0)
-    if safe_name == "" then
-        safe_name = "local_feed"
-    end
     local digest = sha2.md5(identifier)
-    return string.format("%s/%s_%s.json", base_dir, safe_name, digest)
+    local sanitized = identifier
+    if type(sanitized) ~= "string" then
+        sanitized = tostring(sanitized)
+    end
+    sanitized = sanitized:gsub("[\\/:*?\"<>|]", "_")
+    sanitized = sanitized:gsub("%s+", "_")
+    sanitized = sanitized:gsub("__+", "_")
+    sanitized = sanitized:gsub("^_+", "")
+    sanitized = sanitized:gsub("_+$", "")
+    if sanitized == "" then
+        sanitized = "local_feed"
+    else
+        sanitized = sanitized:sub(1, 80)
+    end
+    return string.format("%s/%s_%s.json", base_dir, sanitized, digest)
 end
 
 local function readFile(path)
@@ -48,9 +58,9 @@ local function writeFile(path, data)
     if not file then
         return false
     end
-    file:write(data)
+    local ok = file:write(data)
     file:close()
-    return true
+    return ok and true or false
 end
 
 local function encodePayload(map)

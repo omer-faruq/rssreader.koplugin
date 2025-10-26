@@ -26,6 +26,7 @@ local LocalStore = require("rssreader_local_store")
 local StoryViewer = require("rssreader_story_viewer")
 local FeedFetcher = require("rssreader_feed_fetcher")
 local HtmlSanitizer = require("rssreader_html_sanitizer")
+local sha2 = require("ffi/sha2")
 local LocalReadState
 
 local MenuBuilder = {}
@@ -248,9 +249,34 @@ local function storyUniqueKey(story)
         or story.permalink
         or story.href
         or story.link
-    if not key and story.story_title then
-        local suffix = story.date or story.timestamp or story.created_on_time or ""
-        key = string.format("%s::%s", story.story_title, tostring(suffix))
+        or story.url
+    if not key then
+        local pieces = {}
+        local title = story.story_title or story.title or story.permalink or story.href or story.link
+        if title and title ~= "" then
+            table.insert(pieces, title)
+        end
+        local suffix = story.date
+            or story.timestamp
+            or story.created_on_time
+            or story.updated
+            or story.published
+            or story.pubDate
+            or story.modified
+            or story.dc_date
+            or story.last_modified
+            or story.insertedDate
+            or story.created
+            or story.guid
+            or ""
+        table.insert(pieces, tostring(suffix))
+        local content_fragment = story.story_content or story.content or story.summary or story.description
+        if type(content_fragment) == "string" and content_fragment ~= "" then
+            table.insert(pieces, content_fragment:sub(1, 512))
+        end
+        if #pieces > 0 then
+            key = string.format("local:%s", sha2.md5(table.concat(pieces, "::")))
+        end
     end
     if key == nil then
         return nil
@@ -1482,6 +1508,7 @@ function MenuBuilder:showLocalFeed(feed, opts)
         end
         read_map = self.local_read_state.prune(feed_identifier, read_map, valid_keys)
         feed_node._rss_local_read_map = read_map
+        self.local_read_state.save(feed_identifier, read_map)
     end
 
     local function finalizeMenu()
