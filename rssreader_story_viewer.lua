@@ -235,24 +235,28 @@ local function ensureTempDirectory()
     return temp_dir
 end
 
-local function writeHtmlDocument(html_body, filepath)
+local function writeHtmlDocument(html_body, filepath, title)
     local file = io.open(filepath, "w")
     if not file then
         return false
     end
-    file:write("<html><head><meta charset=\"utf-8\"></head><body>")
+    file:write("<html><head><meta charset=\"utf-8\">")
+    if type(title) == "string" and title ~= "" then
+        file:write("<title>" .. util.htmlEscape(title) .. "</title>")
+    end
+    file:write("</head><body>")
     file:write(html_body or "")
     file:write("</body></html>")
     file:close()
     return true
 end
 
-local function writeHtmlToTempFile(html)
+local function writeHtmlToTempFile(html, title)
     local temp_dir = ensureTempDirectory()
     story_temp_counter = (story_temp_counter + 1) % 100000
     local filename = string.format("story_%d_%d.html", os.time(), story_temp_counter)
     local filepath = temp_dir .. "/" .. filename
-    if writeHtmlDocument(html, filepath) then
+    if writeHtmlDocument(html, filepath, title) then
         return filepath
     end
     return nil
@@ -341,7 +345,8 @@ function StoryViewer:showStory(story, on_action, on_close, options)
     end
 
     -- Add H3 title at the beginning of HTML content with author and date
-    local title = replaceRightSingleQuoteEntities(story.story_title or story.title or DEFAULT_STORY_TITLE)
+    local base_title = replaceRightSingleQuoteEntities(story.story_title or story.title or DEFAULT_STORY_TITLE)
+    local heading_title = base_title
     local raw_author = story.author or story.creator
     local author
     if type(raw_author) == "function" then
@@ -360,15 +365,15 @@ function StoryViewer:showStory(story, on_action, on_close, options)
     end
     if author then
         author = replaceRightSingleQuoteEntities(author)
-        title = title .. " - " .. author
+        heading_title = heading_title .. " - " .. author
     end
     local date_str = formatStoryDate(story)
     if date_str then
-        title = title .. " - " .. date_str
+        heading_title = heading_title .. " - " .. date_str
     end
-    html = "<h3>" .. title .. "</h3>" .. html
+    html = "<h3>" .. heading_title .. "</h3>" .. html
 
-    local temp_file = writeHtmlToTempFile(html)
+    local temp_file = writeHtmlToTempFile(html, base_title)
     if not temp_file then
         self:_showFallback(story, on_action, on_close, options)
         return
@@ -378,7 +383,7 @@ function StoryViewer:showStory(story, on_action, on_close, options)
     local screen_height = Device.screen:getHeight()
     local width = screen_width - Size.padding.fullscreen * 2
     local height = screen_height - Size.padding.fullscreen * 2
-    local title = replaceRightSingleQuoteEntities(story.story_title or story.title or DEFAULT_STORY_TITLE)
+    local title = base_title
 
     local dialog = WidgetContainer:extend{}
     local viewer_dialog

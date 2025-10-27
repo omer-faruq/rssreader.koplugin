@@ -444,7 +444,7 @@ local function sanitizeFiveFiltersHtml(html)
     return html
 end
 
-local function writeStoryHtmlFile(html, filepath)
+local function writeStoryHtmlFile(html, filepath, title)
     if type(html) == "string" and html ~= "" then
         html = sanitizeFiveFiltersHtml(html)
         html = HtmlSanitizer.disableFontSizeDeclarations(html)
@@ -453,7 +453,11 @@ local function writeStoryHtmlFile(html, filepath)
     if not file then
         return false
     end
-    file:write("<html><head><meta charset=\"utf-8\"></head><body>")
+    file:write("<html><head><meta charset=\"utf-8\">")
+    if type(title) == "string" and title ~= "" then
+        file:write("<title>" .. util.htmlEscape(title) .. "</title>")
+    end
+    file:write("</head><body>")
     file:write(html or "")
     file:write("</body></html>")
     file:close()
@@ -495,6 +499,17 @@ local function safeFilenameFromStory(story)
         title = "story"
     end
     return string.format("%s_%d.html", title:sub(1, 64), os.time())
+end
+
+local function resolveStoryDocumentTitle(story)
+    if type(story) ~= "table" then
+        return _("Untitled story")
+    end
+    local title = story.story_title or story.title or story.permalink or _("Untitled story")
+    if type(title) ~= "string" or title == "" then
+        title = _("Untitled story")
+    end
+    return replaceRightSingleQuoteEntities(title)
 end
 
 local function rewriteRelativeResourceUrls(html, page_url)
@@ -756,7 +771,7 @@ local function downloadStoryToCache(story, builder, on_complete)
             return
         end
 
-        if not writeStoryHtmlFile(content, target_path) then
+        if not writeStoryHtmlFile(content, target_path, resolveStoryDocumentTitle(story)) then
             if on_complete then
                 on_complete(nil, "write_error")
             end
@@ -1114,7 +1129,7 @@ function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
 
             local filename = safeFilenameFromStory(target_story)
             local target_path = buildUniqueTargetPath(directory, filename)
-            if not writeStoryHtmlFile(content, target_path) then
+            if not writeStoryHtmlFile(content, target_path, resolveStoryDocumentTitle(target_story)) then
                 UIManager:show(InfoMessage:new{ text = _("Failed to save story."), timeout = 3 })
                 return
             end
