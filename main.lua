@@ -532,6 +532,10 @@ function RSSReader:goBackFromMenu(menu_instance)
 end
 
 function RSSReader:onMenuClosed(menu_instance)
+    if UIManager:isWidgetShown(menu_instance) then
+        return
+    end
+
     if self.current_menu_info and self.current_menu_info.menu == menu_instance then
         self.current_menu_info = nil
         -- Only reset history if we're closing the top-level menu without navigating.
