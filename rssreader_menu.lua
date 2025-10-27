@@ -1323,6 +1323,93 @@ function MenuBuilder:createLongPressMenuForNode(account, client, node, normal_ca
     return dialog
 end
 
+function MenuBuilder:createStoryLongPressMenu(stories, index, context, open_callback)
+    local story = stories and stories[index]
+    if not story then
+        return
+    end
+
+    normalizeStoryReadState(story)
+    local dialog
+    local is_unread = isUnread(story)
+
+    local function closeDialog()
+        if dialog then
+            UIManager:close(dialog)
+        end
+    end
+
+    local function markStoryReadIfNeeded()
+        if is_unread then
+            self:handleStoryAction(stories, index, "mark_read", story, context)
+            is_unread = false
+        end
+    end
+
+    local buttons = {{
+        {
+            text = _("Preview"),
+            callback = function()
+                closeDialog()
+                markStoryReadIfNeeded()
+                if type(open_callback) == "function" then
+                    open_callback()
+                end
+            end,
+        },
+        {
+            text = _("Open"),
+            callback = function()
+                closeDialog()
+                markStoryReadIfNeeded()
+                self:handleStoryAction(stories, index, "go_to_link", { story = story }, context)
+            end,
+        },
+        {
+            text = _("Save"),
+            callback = function()
+                closeDialog()
+                markStoryReadIfNeeded()
+                self:handleStoryAction(stories, index, "save_story", { story = story }, context)
+            end,
+        },
+    }}
+
+    local mark_text
+    local mark_action
+    if is_unread then
+        mark_text = _("Mark as read")
+        mark_action = "mark_read"
+    else
+        mark_text = _("Mark as unread")
+        mark_action = "mark_unread"
+    end
+
+    table.insert(buttons, {
+        {
+            text = mark_text,
+            callback = function()
+                closeDialog()
+                self:handleStoryAction(stories, index, mark_action, story, context)
+            end,
+        },
+        {
+            text = _("Close"),
+            callback = function()
+                closeDialog()
+            end,
+        },
+    })
+
+    dialog = ButtonDialog:new{
+        title = story.story_title or story.title or _("Story"),
+        buttons = buttons,
+    }
+
+    UIManager:show(dialog)
+    return dialog
+end
+
 function MenuBuilder:createLongPressMenuForLocalFeed(feed, account_name, normal_callback)
     if not feed then
         return
@@ -1872,14 +1959,19 @@ function MenuBuilder:showLocalFeed(feed, opts)
             normalizeStoryReadState(story)
             normalizeStoryLink(story)
             local entry_is_unread = isUnread(story)
+            local function openStory()
+                self:showStory(stories, index, function(action, payload)
+                    self:handleStoryAction(stories, index, action, payload, context)
+                end, nil, nil, context)
+            end
             table.insert(entries, {
                 text = decoratedStoryTitle(story, true),
                 bold = entry_is_unread,
-                callback = function()
-                    self:showStory(stories, index, function(action, payload)
-                        self:handleStoryAction(stories, index, action, payload, context)
-                    end, nil, nil, context)
+                callback = openStory,
+                hold_callback = function()
+                    self:createStoryLongPressMenu(stories, index, context, openStory)
                 end,
+                hold_keep_menu_open = true,
             })
         end
 
@@ -1893,6 +1985,7 @@ function MenuBuilder:showLocalFeed(feed, opts)
             if menu_instance.switchItemTable then
                 menu_instance:switchItemTable(nil, entries)
             end
+            menu_instance.onMenuHold = triggerHoldCallback
         else
             menu_instance = Menu:new{
                 title = feed_node.title or _("Feed"),
@@ -1900,6 +1993,7 @@ function MenuBuilder:showLocalFeed(feed, opts)
                 multilines_forced = true,
             }
             menu_instance._rss_feed_node = feed_node
+            menu_instance.onMenuHold = triggerHoldCallback
             ensureMenuCloseHook(menu_instance)
             trackMenuPage(menu_instance, feed_node)
             self:showMenu(menu_instance, function()
@@ -1912,6 +2006,7 @@ function MenuBuilder:showLocalFeed(feed, opts)
         if menu_instance then
             context.menu_instance = menu_instance
             menu_instance._rss_feed_node = feed_node
+            menu_instance.onMenuHold = triggerHoldCallback
             ensureMenuCloseHook(menu_instance)
             trackMenuPage(menu_instance, feed_node)
             persistFeedState(menu_instance, feed_node)
@@ -2331,14 +2426,19 @@ function MenuBuilder:showNewsBlurFeed(account, client, feed_node, opts)
         for index, story in ipairs(stories) do
             normalizeStoryReadState(story)
             normalizeStoryLink(story)
+            local function openStory()
+                self:showStory(stories, index, function(action, payload)
+                    self:handleStoryAction(stories, index, action, payload, context)
+                end, nil, { disable_story_mutators = true }, context)
+            end
             table.insert(entries, {
                 text = decoratedStoryTitle(story, true),
                 bold = isUnread(story),
-                callback = function()
-                    self:showStory(stories, index, function(action, payload)
-                        self:handleStoryAction(stories, index, action, payload, context)
-                    end, nil, { disable_story_mutators = true }, context)
+                callback = openStory,
+                hold_callback = function()
+                    self:createStoryLongPressMenu(stories, index, context, openStory)
                 end,
+                hold_keep_menu_open = true,
             })
         end
 
@@ -2352,6 +2452,7 @@ function MenuBuilder:showNewsBlurFeed(account, client, feed_node, opts)
             if menu_instance.switchItemTable then
                 menu_instance:switchItemTable(nil, entries)
             end
+            menu_instance.onMenuHold = triggerHoldCallback
         else
             menu_instance = Menu:new{
                 title = feed_node.title or (account and account.name) or _("NewsBlur"),
@@ -2359,6 +2460,7 @@ function MenuBuilder:showNewsBlurFeed(account, client, feed_node, opts)
                 multilines_forced = true,
             }
             menu_instance._rss_feed_node = feed_node
+            menu_instance.onMenuHold = triggerHoldCallback
             ensureMenuCloseHook(menu_instance)
             trackMenuPage(menu_instance, feed_node)
             self:showMenu(menu_instance, function()
@@ -2369,6 +2471,7 @@ function MenuBuilder:showNewsBlurFeed(account, client, feed_node, opts)
         if menu_instance then
             context.menu_instance = menu_instance
             menu_instance._rss_feed_node = feed_node
+            menu_instance.onMenuHold = triggerHoldCallback
             ensureMenuCloseHook(menu_instance)
             trackMenuPage(menu_instance, feed_node)
             persistFeedState(menu_instance, feed_node)
@@ -2607,14 +2710,19 @@ function MenuBuilder:showCommaFeedFeed(account, client, feed_node, opts)
         local entries = {}
         for index, story in ipairs(stories) do
             normalizeStoryLink(story)
+            local function openStory()
+                self:showStory(stories, index, function(action, payload)
+                    self:handleStoryAction(stories, index, action, payload, context)
+                end, nil, { disable_story_mutators = true }, context)
+            end
             table.insert(entries, {
                 text = decoratedStoryTitle(story, true),
                 bold = isUnread(story),
-                callback = function()
-                    self:showStory(stories, index, function(action, payload)
-                        self:handleStoryAction(stories, index, action, payload, context)
-                    end, nil, { disable_story_mutators = true }, context)
+                callback = openStory,
+                hold_callback = function()
+                    self:createStoryLongPressMenu(stories, index, context, openStory)
                 end,
+                hold_keep_menu_open = true,
             })
         end
 
@@ -2628,6 +2736,7 @@ function MenuBuilder:showCommaFeedFeed(account, client, feed_node, opts)
             if menu_instance.switchItemTable then
                 menu_instance:switchItemTable(nil, entries)
             end
+            menu_instance.onMenuHold = triggerHoldCallback
         else
             menu_instance = Menu:new{
                 title = feed_node.title or (account and account.name) or _("CommaFeed"),
@@ -2635,6 +2744,7 @@ function MenuBuilder:showCommaFeedFeed(account, client, feed_node, opts)
                 multilines_forced = true,
             }
             menu_instance._rss_feed_node = feed_node
+            menu_instance.onMenuHold = triggerHoldCallback
             ensureMenuCloseHook(menu_instance)
             trackMenuPage(menu_instance, feed_node)
             self:showMenu(menu_instance, function()
@@ -2645,6 +2755,7 @@ function MenuBuilder:showCommaFeedFeed(account, client, feed_node, opts)
         if menu_instance then
             context.menu_instance = menu_instance
             menu_instance._rss_feed_node = feed_node
+            menu_instance.onMenuHold = triggerHoldCallback
             ensureMenuCloseHook(menu_instance)
             trackMenuPage(menu_instance, feed_node)
         end
