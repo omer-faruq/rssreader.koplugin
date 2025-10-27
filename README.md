@@ -26,6 +26,10 @@ The other Lua files handle internal logic. End users do not need to open or modi
 - The account list reflects the entries you configured; tap to open, long-press for more options.
 - For local accounts, the groups and feeds defined in your renamed `rssreader_local_defaults.lua` appear. Editing the URLs here is how you add new sources.
 
+### Mark All as Read
+- **Long-press any feed title** to open the contextual menu.
+- Choose **Mark all as read** to update the read state for every story in that feed. 
+
 ## Ready-to-Use Defaults
 - If you need a template, use `rssreader_configuration.sample.lua` and rename it to `rssreader_configuration.lua` after customizing.
 - The "Sample" and "Tech Blogs" groups in `rssreader_local_defaults.sample.lua` give you starting points. Rename the file to `rssreader_local_defaults.lua` once you finish editing.
