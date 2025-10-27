@@ -1165,6 +1165,116 @@ function MenuBuilder:createLongPressMenuForNode(account, client, node, normal_ca
     return dialog
 end
 
+function MenuBuilder:createLongPressMenuForLocalFeed(feed, account_name, normal_callback)
+    if not feed then
+        return
+    end
+
+    local dialog
+    dialog = ButtonDialog:new{
+        title = feed.title or feed.url or _("Feed"),
+        buttons = {{
+            {
+                text = _("Open"),
+                callback = function()
+                    UIManager:close(dialog)
+                    if type(normal_callback) == "function" then
+                        normal_callback()
+                    end
+                end,
+            },
+            {
+                text = _("Mark all as read"),
+                callback = function()
+                    UIManager:close(dialog)
+                    self:performLocalMarkAllAsRead(feed, account_name)
+                end,
+            },
+            {
+                text = _("Close"),
+                callback = function()
+                    UIManager:close(dialog)
+                end,
+            },
+        }},
+    }
+
+    UIManager:show(dialog)
+    return dialog
+end
+
+function MenuBuilder:performLocalMarkAllAsRead(feed, account_name)
+    if not feed or not feed.url then
+        UIManager:show(InfoMessage:new{
+            text = _("Feed URL is missing."),
+            timeout = 3,
+        })
+        return
+    end
+
+    local title = feed.title or feed.url or _("Feed")
+    UIManager:show(InfoMessage:new{
+        text = string.format(_("Marking feed '%s' as read..."), title),
+        timeout = 1,
+    })
+
+    local feed_identifier = feed.url or feed.id or feed.title or "local_feed"
+    account_name = account_name or feed._rss_account_name or "local"
+
+    NetworkMgr:runWhenOnline(function()
+        local ok, items_or_err = FeedFetcher.fetch(feed.url)
+        if not ok then
+            UIManager:show(InfoMessage:new{
+                text = string.format(_("Failed to load feed: %s"), items_or_err or _("unknown")),
+                timeout = 3,
+            })
+            return
+        end
+
+        local items = items_or_err or {}
+        if type(items) ~= "table" then
+            items = {}
+        end
+
+        local read_map = self.local_read_state.load(feed_identifier)
+        if type(read_map) ~= "table" then
+            read_map = {}
+        end
+
+        local new_marks = 0
+        for _, story in ipairs(items) do
+            normalizeStoryReadState(story)
+            local key = storyUniqueKey(story)
+            if key then
+                if not read_map[key] then
+                    new_marks = new_marks + 1
+                end
+                read_map[key] = true
+            end
+        end
+
+        self.local_read_state.save(feed_identifier, read_map)
+
+        local feed_node = feed._rss_feed_node
+        if feed_node then
+            feed_node._rss_local_read_map = read_map
+            for _, story in ipairs(feed_node._rss_stories or {}) do
+                local key = story._rss_local_key or storyUniqueKey(story)
+                if key then
+                    story._rss_local_key = key
+                    setStoryReadState(story, true)
+                end
+            end
+            self:_updateFeedCache({ feed_node = feed_node })
+        end
+
+        UIManager:show(InfoMessage:new{
+            text = string.format(_("Marked %d item(s) as read."), new_marks),
+            timeout = 3,
+        })
+    end)
+end
+
 function MenuBuilder:showMarkAllAsReadDialogForAccount(account)
     local title_text = string.format(_("Mark all stories in account '%s' as read?"), account.name or _("Account"))
 
@@ -1828,18 +1938,18 @@ function MenuBuilder:showLocalAccount(account)
     local entries = {}
     for feed_index, feed in ipairs(feeds) do
         local feed_title = feed.title or (feed.url or _("Unnamed feed"))
+        local function openFeed()
+            self:showLocalFeed(feed, {
+                account_name = account_name,
+            })
+        end
         table.insert(entries, {
             text = feed_title,
-            callback = function()
-                self:showLocalFeed(feed, {
-                    account_name = account_name,
-                })
-            end,
+            callback = openFeed,
             hold_callback = function()
-                self:showLocalFeed(feed, {
-                    account_name = account_name,
-                })
+                self:createLongPressMenuForLocalFeed(feed, account_name, openFeed)
             end,
+            hold_keep_menu_open = true,
         })
     end
     for group_index, group in ipairs(groups) do
@@ -1866,6 +1976,7 @@ function MenuBuilder:showLocalAccount(account)
         title = Commons.accountTitle(account),
         item_table = entries,
     }
+    menu_instance.onMenuHold = triggerHoldCallback
     self:showMenu(menu_instance, function()
         self:showLocalAccount(account)
     end)
@@ -1875,18 +1986,18 @@ function MenuBuilder:showLocalGroup(group, account_name)
     local feeds = (group and group.feeds) or {}
     local entries = {}
     for feed_index, feed in ipairs(feeds) do
+        local function openFeed()
+            self:showLocalFeed(feed, {
+                account_name = account_name,
+            })
+        end
         table.insert(entries, {
             text = feed.title or (feed.url or _("Unnamed feed")),
-            callback = function()
-                self:showLocalFeed(feed, {
-                    account_name = account_name,
-                })
-            end,
+            callback = openFeed,
             hold_callback = function()
-                self:showLocalFeed(feed, {
-                    account_name = account_name,
-                })
+                self:createLongPressMenuForLocalFeed(feed, account_name, openFeed)
             end,
+            hold_keep_menu_open = true,
         })
     end
 
@@ -1908,6 +2019,7 @@ function MenuBuilder:showLocalGroup(group, account_name)
         title = group and (group.title or _("Local Group")) or _("Local Group"),
         item_table = entries,
     }
+    menu_instance.onMenuHold = triggerHoldCallback
     self:showMenu(menu_instance, function()
         self:showLocalGroup(group, account_name)
     end)
