@@ -43,7 +43,21 @@ local function sanitize(value)
         return nil
     end
     value = stripCData(value)
-    return util.htmlEntitiesToUtf8(value)
+    if type(value) ~= "string" then
+        return nil
+    end
+    value = util.trim(value)
+    if value == "" then
+        return nil
+    end
+    value = util.htmlEntitiesToUtf8(value)
+    if type(value) == "string" then
+        value = util.trim(value)
+        if value == "" then
+            return nil
+        end
+    end
+    return value
 end
 
 local function decodeAtomBody(body, attrs)
