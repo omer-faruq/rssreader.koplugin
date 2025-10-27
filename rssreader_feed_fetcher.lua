@@ -109,6 +109,10 @@ local function parseRSS(content)
         local description = raw:match("<description[^>]*>(.-)</description>")
         local contentEncoded = raw:match("<content:encoded[^>]*>(.-)</content:encoded>")
         local body = contentEncoded or description
+        body = stripCData(body)
+        if body and body ~= "" then
+            body = util.htmlEntitiesToUtf8(body)
+        end
         local pub_date = stripCData(raw:match("<pubDate[^>]*>(.-)</pubDate>"))
             or stripCData(raw:match("<dc:date[^>]*>(.-)</dc:date>"))
             or stripCData(raw:match("<published[^>]*>(.-)</published>"))
@@ -120,7 +124,7 @@ local function parseRSS(content)
             table.insert(items, {
                 story_title = title or link or "Untitled",
                 permalink = link,
-                story_content = stripCData(body),
+                story_content = body,
                 date = pub_date,
             })
         end
