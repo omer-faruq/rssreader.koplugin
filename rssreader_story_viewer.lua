@@ -31,6 +31,44 @@ local ENTITY_REPLACEMENTS = {
     ["&#8217;"] = "’",
 }
 
+local function parseReadFlag(value)
+    local value_type = type(value)
+    if value_type == "boolean" then
+        return value
+    elseif value_type == "number" then
+        if value == 0 then
+            return false
+        elseif value == 1 then
+            return true
+        end
+    elseif value_type == "string" then
+        local lowered = value:lower()
+        if lowered == "0" or lowered == "false" then
+            return false
+        elseif lowered == "1" or lowered == "true" then
+            return true
+        end
+    end
+    return nil
+end
+
+local function storyIsUnread(story)
+    if type(story) ~= "table" then
+        return false
+    end
+    if story._rss_is_read ~= nil then
+        return not story._rss_is_read
+    end
+    local fields = { "read_status", "read", "story_read" }
+    for _, key in ipairs(fields) do
+        local parsed = parseReadFlag(story[key])
+        if parsed ~= nil then
+            return not parsed
+        end
+    end
+    return true
+end
+
 local function replaceRightSingleQuoteEntities(text)
     if type(text) ~= "string" then
         return text
@@ -107,14 +145,20 @@ local function buildToolbarButtons(story, on_action, close_handler, include_clos
                 disable_mutators = true
             end
         end
-        local temprorary_disabled = true
+        local allow_mark_unread = true
+        if options and options.allow_mark_unread ~= nil then
+            allow_mark_unread = options.allow_mark_unread and true or false
+        end
+        local is_read = not storyIsUnread(story)
+        local keep_unread_label = is_read and _("Mark as unread") or _("Keep unread")
         local first_row = {}
-        if not disable_mutators and not temprorary_disabled then
+        if not disable_mutators and allow_mark_unread then
             table.insert(first_row, {
-                text = _("Mark as unread"),
+                text = keep_unread_label,
                 callback = function()
                     on_action("mark_unread", story)
                 end,
+                disabled = not allow_mark_unread,
             })
         end
         if options and options.include_save then
@@ -246,6 +290,7 @@ function StoryViewer:_showFallback(story, on_action, on_close, options)
         include_save = true,
         disable_story_mutators = options and options.disable_story_mutators,
         is_api_version = options and options.is_api_version,
+        allow_mark_unread = options and options.allow_mark_unread,
     }
     local buttons = on_action and buildToolbarButtons(story, on_action, closeViewer, false, button_options) or nil
 
@@ -353,6 +398,7 @@ function StoryViewer:showStory(story, on_action, on_close, options)
         include_save = true,
         disable_story_mutators = options and options.disable_story_mutators,
         is_api_version = options and options.is_api_version,
+        allow_mark_unread = options and options.allow_mark_unread,
     })
     local button_table = ButtonTable:new{
         width = width,

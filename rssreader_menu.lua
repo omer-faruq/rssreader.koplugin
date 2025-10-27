@@ -237,6 +237,20 @@ local function decoratedStoryTitle(story, decorate)
     return title
 end
 
+local function resolveStoryFeedId(context, story)
+    if context and context.feed_id then
+        return context.feed_id
+    end
+    if type(story) ~= "table" then
+        return nil
+    end
+    local feed_identifier = story.story_feed_id or story.feed_id or story.storyFeedId or story.feedId
+    if feed_identifier ~= nil then
+        return tostring(feed_identifier)
+    end
+    return nil
+end
+
 local function storyUniqueKey(story)
     if type(story) ~= "table" then
         return nil
@@ -827,6 +841,19 @@ function MenuBuilder:showStory(stories, index, on_action, on_close, options, con
     if options and options.disable_story_mutators and not is_api_context then
         disable_mutators = true
     end
+    local allow_mark_unread = true
+    if context then
+        if context.feed_type == "local" then
+            allow_mark_unread = true
+        else
+            local client = context.client
+            if client and type(client.markStoryAsUnread) == "function" then
+                allow_mark_unread = true
+            else
+                allow_mark_unread = false
+            end
+        end
+    end
     self.story_viewer:showStory(story, function(action, payload)
         self:handleStoryAction(stories, index, action, payload, context)
     end, function()
@@ -854,6 +881,7 @@ function MenuBuilder:showStory(stories, index, on_action, on_close, options, con
     end, {
         disable_story_mutators = disable_mutators,
         is_api_version = is_api_context,
+        allow_mark_unread = allow_mark_unread,
     })
 end
 
@@ -995,17 +1023,22 @@ function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
             self:_updateFeedCache(context)
             if context and context.feed_type == "local" then
                 local feed_identifier = context.feed_identifier or (context.feed_node and (context.feed_node.url or context.feed_node.id))
-                if feed_identifier and story._rss_local_key then
-                    context.local_read_map = context.local_read_map or {}
-                    context.local_read_map = self.local_read_state.markRead(feed_identifier, story._rss_local_key, context.local_read_map)
-                    if context.feed_node then
-                        context.feed_node._rss_local_read_map = context.local_read_map
+                if feed_identifier then
+                    local story_local_key = story._rss_local_key or storyUniqueKey(story)
+                    if story_local_key then
+                        story._rss_local_key = story_local_key
+                        context.local_read_map = context.local_read_map or {}
+                        context.local_read_map = self.local_read_state.markRead(feed_identifier, story_local_key, context.local_read_map)
+                        if context.feed_node then
+                            context.feed_node._rss_local_read_map = context.local_read_map
+                        end
                     end
                 end
             end
-            if context and context.client and context.feed_id and type(context.client.markStoryAsRead) == "function" then
+            local remote_feed_id = resolveStoryFeedId(context, story)
+            if context and context.client and remote_feed_id and type(context.client.markStoryAsRead) == "function" then
                 NetworkMgr:runWhenOnline(function()
-                    local ok, err_or_data = context.client:markStoryAsRead(context.feed_id, story)
+                    local ok, err_or_data = context.client:markStoryAsRead(remote_feed_id, story)
                     if not ok then
                         setStoryReadState(story, false)
                         self:_updateStoryEntry(context, stories, index)
@@ -1021,9 +1054,10 @@ function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
     if action == "mark_unread" then
         if story then
             setStoryReadState(story, false)
-            if context and context.client and context.feed_id and type(context.client.markStoryAsUnread) == "function" then
+            local remote_feed_id = resolveStoryFeedId(context, story)
+            if context and context.client and remote_feed_id and type(context.client.markStoryAsUnread) == "function" then
                 NetworkMgr:runWhenOnline(function()
-                    local ok, err_or_data = context.client:markStoryAsUnread(context.feed_id, story)
+                    local ok, err_or_data = context.client:markStoryAsUnread(remote_feed_id, story)
                     if ok then
                         self:_updateStoryEntry(context, stories, index)
                         self:_updateFeedCache(context)
@@ -1036,11 +1070,15 @@ function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
             end
             if context and context.feed_type == "local" then
                 local feed_identifier = context.feed_identifier or (context.feed_node and (context.feed_node.url or context.feed_node.id))
-                if feed_identifier and story._rss_local_key then
-                    context.local_read_map = context.local_read_map or {}
-                    context.local_read_map = self.local_read_state.markUnread(feed_identifier, story._rss_local_key, context.local_read_map)
-                    if context.feed_node then
-                        context.feed_node._rss_local_read_map = context.local_read_map
+                if feed_identifier then
+                    local story_local_key = story._rss_local_key or storyUniqueKey(story)
+                    if story_local_key then
+                        story._rss_local_key = story_local_key
+                        context.local_read_map = context.local_read_map or {}
+                        context.local_read_map = self.local_read_state.markUnread(feed_identifier, story_local_key, context.local_read_map)
+                        if context.feed_node then
+                            context.feed_node._rss_local_read_map = context.local_read_map
+                        end
                     end
                 end
             end
