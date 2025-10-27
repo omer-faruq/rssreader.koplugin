@@ -30,8 +30,16 @@ return {
             active = false, -- set to true to enable this account
         },
     },
+    sanitizers = { -- available types = fivefilters
+        {
+            order = 1,
+            type = "fivefilters",
+            active = true,
+        }
+    },
     features = {
         default_folder_on_save = nil, -- set a folder to save new feeds to, if nil then default is home folder
-        use_fivefilters_on_save_open = true, --try to use fivefilters on save and open a website to sanitize it
+        download_images_when_sanitize_successful = true, -- if sanitize functionality is successful, download images
+        download_images_when_sanitize_unsuccessful = true, -- if sanitize functionality is unsuccessful, download images (for the original html file)
     },
 }

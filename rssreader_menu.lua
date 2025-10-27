@@ -26,6 +26,7 @@ local LocalStore = require("rssreader_local_store")
 local StoryViewer = require("rssreader_story_viewer")
 local FeedFetcher = require("rssreader_feed_fetcher")
 local HtmlSanitizer = require("rssreader_html_sanitizer")
+local HtmlResources = require("rssreader_html_resources")
 local sha2 = require("ffi/sha2")
 local LocalReadState
 
@@ -436,6 +437,47 @@ local function buildCacheDirectory()
     return base_dir
 end
 
+local function getFeatureFlag(builder, key)
+    if not builder or not builder.accounts or not builder.accounts.config then
+        return nil
+    end
+    return util.tableGetValue(builder.accounts.config, "features", key)
+end
+
+local function shouldDownloadImages(builder, sanitized_successful)
+    local key = sanitized_successful and "download_images_when_sanitize_successful" or "download_images_when_sanitize_unsuccessful"
+    local flag = getFeatureFlag(builder, key)
+    return flag == true
+end
+
+local function collectActiveSanitizers(builder)
+    if not builder or not builder.accounts or not builder.accounts.config then
+        return nil
+    end
+    local configured = builder.accounts.config.sanitizers
+    if type(configured) ~= "table" then
+        return nil
+    end
+    local ordered = {}
+    for _, entry in ipairs(configured) do
+        if type(entry) == "table" and entry.type and entry.active ~= false then
+            ordered[#ordered + 1] = entry
+        end
+    end
+    table.sort(ordered, function(a, b)
+        local ao = type(a.order) == "number" and a.order or math.huge
+        local bo = type(b.order) == "number" and b.order or math.huge
+        if ao == bo then
+            return tostring(a.type) < tostring(b.type)
+        end
+        return ao < bo
+    end)
+    if #ordered == 0 then
+        return nil
+    end
+    return ordered
+end
+
 local function sanitizeFiveFiltersHtml(html)
     if type(html) ~= "string" or html == "" then
         return html
@@ -699,7 +741,42 @@ local function fetchStoryContent(story, builder, on_complete, options)
 
     NetworkMgr:runWhenOnline(function()
         UIManager:nextTick(function()
-            local use_fivefilters = shouldUseFiveFilters(builder)
+            local configured_sanitizers = collectActiveSanitizers(builder)
+            if (not configured_sanitizers or #configured_sanitizers == 0) and shouldUseFiveFilters(builder) then
+                configured_sanitizers = { { type = "fivefilters" } }
+            end
+
+            local function finalizeContent(raw_html, sanitized_successful)
+                if not raw_html then
+                    if on_complete then
+                        on_complete(nil, "empty_content")
+                    end
+                    return
+                end
+
+                raw_html = rewriteRelativeResourceUrls(raw_html, link)
+                raw_html = HtmlSanitizer.disableFontSizeDeclarations(raw_html)
+
+                local download_info
+                if shouldDownloadImages(builder, sanitized_successful) then
+                    local asset_base_dir = options and options.asset_base_dir or buildCacheDirectory()
+                    local asset_base_name = options and options.asset_base_name or string.format("story_%d", os.time())
+                    local asset_paths = HtmlResources.prepareAssetPaths(asset_base_dir, asset_base_name)
+                    if asset_paths then
+                        local rewritten, assets = HtmlResources.downloadAndRewrite(raw_html, link, asset_paths)
+                        if rewritten then
+                            raw_html = rewritten
+                        end
+                        download_info = assets
+                    else
+                        logger.warn("RSSReader", "Failed to prepare asset directories for images")
+                    end
+                end
+
+                if on_complete then
+                    on_complete(raw_html, nil, download_info)
+                end
+            end
 
             local function handleOriginalDownload()
                 fetchViaHttp(link, function(content, err)
@@ -709,51 +786,64 @@ local function fetchStoryContent(story, builder, on_complete, options)
                         end
                         return
                     end
-                    content = rewriteRelativeResourceUrls(content, link)
-                    content = HtmlSanitizer.disableFontSizeDeclarations(content)
-                    if on_complete then
-                        on_complete(content)
-                    end
+                    finalizeContent(content, false)
                 end)
             end
 
-            if not use_fivefilters then
+            if not configured_sanitizers or #configured_sanitizers == 0 then
                 handleOriginalDownload()
                 return
             end
 
-            local fivefilters_url = buildFiveFiltersUrl(link)
-            if not fivefilters_url then
-                handleOriginalDownload()
-                return
+            local function processSanitizer(index)
+                local sanitizer = configured_sanitizers[index]
+                if not sanitizer then
+                    handleOriginalDownload()
+                    return
+                end
+
+                local sanitizer_type = sanitizer.type and sanitizer.type:lower() or ""
+                if sanitizer_type == "fivefilters" then
+                    local fivefilters_url = buildFiveFiltersUrl(link)
+                    if not fivefilters_url then
+                        processSanitizer(index + 1)
+                        return
+                    end
+
+                    fetchViaHttp(fivefilters_url, function(content, err)
+                        if not content then
+                            processSanitizer(index + 1)
+                            return
+                        end
+
+                        if not hasLikelyXmlStructure(content) then
+                            processSanitizer(index + 1)
+                            return
+                        end
+
+                        if detectFiveFiltersBlocked(content) then
+                            processSanitizer(index + 1)
+                            return
+                        end
+
+                        local fivefilters_html = rewriteFiveFiltersHtml(extractFiveFiltersHtml(content))
+                        if not fivefilters_html or not fiveFiltersContentIsMeaningful(fivefilters_html) then
+                            processSanitizer(index + 1)
+                            return
+                        end
+
+                        finalizeContent(fivefilters_html, true)
+                    end)
+                elseif sanitizer_type == "diffbot" then
+                    logger.info("RSSReader", "Diffbot sanitizer not yet implemented; skipping")
+                    processSanitizer(index + 1)
+                else
+                    logger.info("RSSReader", "Unknown sanitizer type", sanitizer.type)
+                    processSanitizer(index + 1)
+                end
             end
 
-            fetchViaHttp(fivefilters_url, function(content, err)
-                if not content then
-                    handleOriginalDownload()
-                    return
-                end
-
-                if not hasLikelyXmlStructure(content) then
-                    handleOriginalDownload()
-                    return
-                end
-
-                if detectFiveFiltersBlocked(content) then
-                    handleOriginalDownload()
-                    return
-                end
-
-                local fivefilters_html = rewriteFiveFiltersHtml(extractFiveFiltersHtml(content))
-                if not fivefilters_html or not fiveFiltersContentIsMeaningful(fivefilters_html) then
-                    handleOriginalDownload()
-                    return
-                end
-
-                if on_complete then
-                    on_complete(fivefilters_html)
-                end
-            end)
+            processSanitizer(1)
         end)
     end)
 end
@@ -762,6 +852,7 @@ local function downloadStoryToCache(story, builder, on_complete)
     local cache_dir = buildCacheDirectory()
     local filename = safeFilenameFromStory(story)
     local target_path = cache_dir .. "/" .. filename
+    local base_name = filename:gsub("%.html$", "")
 
     fetchStoryContent(story, builder, function(content, err)
         if not content then
@@ -782,7 +873,10 @@ local function downloadStoryToCache(story, builder, on_complete)
         if on_complete then
             on_complete(target_path)
         end
-    end)
+    end, {
+        asset_base_dir = cache_dir,
+        asset_base_name = base_name,
+    })
 end
 
 local function determineSaveDirectory(builder)
