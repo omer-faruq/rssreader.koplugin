@@ -27,6 +27,27 @@ local StoryViewer = require("rssreader_story_viewer")
 local FeedFetcher = require("rssreader_feed_fetcher")
 local HtmlSanitizer = require("rssreader_html_sanitizer")
 local HtmlResources = require("rssreader_html_resources")
+
+local function loadEpubDownloadBackend()
+    local candidates = {
+        "rssreader_epubdownloadbackend",
+        "plugins.rssreader.koplugin.rssreader_epubdownloadbackend",
+        "epubdownloadbackend",
+        "plugins.newsdownloader.koplugin.epubdownloadbackend",
+    }
+    for _, module_name in ipairs(candidates) do
+        local ok, backend = pcall(require, module_name)
+        if ok and backend then
+            logger.dbg("RSSReader", "Loaded EPUB backend", module_name)
+            return backend
+        end
+    end
+    logger.info("RSSReader", "EpubDownloadBackend not available; EPUB export disabled")
+    return nil
+end
+
+local EpubDownloadBackend = loadEpubDownloadBackend()
+
 local sha2 = require("ffi/sha2")
 local LocalReadState
 
@@ -142,6 +163,8 @@ local function normalizeStoryReadState(story)
             story[key] = parsed
             if read_state == nil then
                 read_state = parsed
+            elseif should_create_epub and not EpubDownloadBackend then
+                logger.warn("RSSReader", "EPUB backend unavailable; saving as HTML instead")
             end
         end
     end
@@ -506,6 +529,23 @@ local function writeStoryHtmlFile(html, filepath, title)
     return true
 end
 
+local function wrapHtmlForEpub(html, title)
+    if type(html) ~= "string" or html == "" then
+        return nil
+    end
+    local escaped_title = util.htmlEscape(title or "")
+    return table.concat({
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
+        "<!DOCTYPE html>",
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\">",
+        "<head><meta charset=\"utf-8\"/>",
+        escaped_title ~= "" and ("<title>" .. escaped_title .. "</title>") or "",
+        "</head><body>",
+        html,
+        "</body></html>",
+    })
+end
+
 local function normalizeStoryLink(story)
     if type(story) ~= "table" then
         return
@@ -757,8 +797,11 @@ local function fetchStoryContent(story, builder, on_complete, options)
                 raw_html = rewriteRelativeResourceUrls(raw_html, link)
                 raw_html = HtmlSanitizer.disableFontSizeDeclarations(raw_html)
 
+                local html_for_epub = raw_html
+
                 local download_info
-                if shouldDownloadImages(builder, sanitized_successful) then
+                local images_requested = shouldDownloadImages(builder, sanitized_successful)
+                if images_requested then
                     local asset_base_dir = options and options.asset_base_dir or buildCacheDirectory()
                     local asset_base_name = options and options.asset_base_name or string.format("story_%d", os.time())
                     local asset_paths = HtmlResources.prepareAssetPaths(asset_base_dir, asset_base_name)
@@ -767,11 +810,25 @@ local function fetchStoryContent(story, builder, on_complete, options)
                         if rewritten then
                             raw_html = rewritten
                         end
-                        download_info = assets
+                        download_info = download_info or {}
+                        download_info.assets = assets
+                        download_info.assets_root = assets and assets.assets_root
+                        download_info.asset_paths = asset_paths
                     else
                         logger.warn("RSSReader", "Failed to prepare asset directories for images")
                     end
                 end
+
+                if type(html_for_epub) == "string" and html_for_epub ~= "" then
+                    html_for_epub = sanitizeFiveFiltersHtml(html_for_epub)
+                end
+                local epub_document = wrapHtmlForEpub(html_for_epub, resolveStoryDocumentTitle(story))
+
+                download_info = download_info or {}
+                download_info.sanitized_successful = sanitized_successful and true or false
+                download_info.images_requested = images_requested and true or false
+                download_info.html_for_epub = epub_document or html_for_epub
+                download_info.original_url = link
 
                 if on_complete then
                     on_complete(raw_html, nil, download_info)
@@ -919,6 +976,17 @@ local function buildUniqueTargetPath(directory, filename)
     return candidate
 end
 
+local function buildUniqueTargetPathWithExtension(directory, base_name, extension)
+    local sanitized_base = base_name:gsub("[^%w%._-]", "_")
+    local candidate = string.format("%s/%s.%s", directory, sanitized_base, extension)
+    local counter = 1
+    while util.pathExists(candidate) do
+        candidate = string.format("%s/%s_%d.%s", directory, sanitized_base, counter, extension)
+        counter = counter + 1
+    end
+    return candidate
+end
+
 function MenuBuilder:showStory(stories, index, on_action, on_close, options, context)
     self.story_viewer = self.story_viewer or StoryViewer:new()
     local reader = self.reader
@@ -1038,7 +1106,7 @@ function MenuBuilder:_updateFeedCache(context)
         or (context.account and context.account.name)
         or context.account_name
         or "unknown"
-    local stories_copy = util.tableDeepCopy(feed_node._rss_stories or {})
+    local stories_copy = feed_node._rss_stories and util.tableDeepCopy(feed_node._rss_stories) or {}
     local story_keys_copy = {}
     for key, value in pairs(feed_node._rss_story_keys or {}) do
         if value then
@@ -1208,7 +1276,7 @@ function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
         normalizeStoryLink(target_story)
         UIManager:show(InfoMessage:new{ text = _("Saving story..."), timeout = 1 })
 
-        fetchStoryContent(target_story, self, function(content, err)
+        fetchStoryContent(target_story, self, function(content, err, download_info)
             if not content then
                 UIManager:show(InfoMessage:new{ text = _("Failed to download story."), timeout = 3 })
                 return
@@ -1222,12 +1290,45 @@ function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
             util.makePath(directory)
 
             local filename = safeFilenameFromStory(target_story)
+            local metadata = type(download_info) == "table" and download_info or {}
+            local include_images = metadata.images_requested and true or false
+            local html_for_epub = metadata.html_for_epub
+            local should_create_epub = include_images and type(html_for_epub) == "string" and html_for_epub ~= ""
+            local assets_root = metadata.assets_root or (metadata.assets and metadata.assets.assets_root)
+            local function cleanupAssets()
+                if assets_root then
+                    HtmlResources.cleanupAssets(assets_root)
+                    assets_root = nil
+                end
+            end
+
+            if should_create_epub and EpubDownloadBackend then
+                local base_name = filename:gsub("%.html$", "")
+                local epub_path = buildUniqueTargetPathWithExtension(directory, base_name, "epub")
+                local story_url = metadata.original_url or target_story.permalink or target_story.href or target_story.link or ""
+                local ok, result_or_err = pcall(function()
+                    return EpubDownloadBackend:createEpub(epub_path, html_for_epub, story_url, include_images)
+                end)
+                local success = ok and result_or_err ~= false
+                if success then
+                    cleanupAssets()
+                    UIManager:show(InfoMessage:new{ text = string.format(_("Saved to: %s"), epub_path), timeout = 3 })
+                    return
+                else
+                    logger.warn("RSSReader", "Failed to create EPUB", result_or_err)
+                    cleanupAssets()
+                    -- Fall back to HTML save below
+                end
+            end
+
             local target_path = buildUniqueTargetPath(directory, filename)
             if not writeStoryHtmlFile(content, target_path, resolveStoryDocumentTitle(target_story)) then
+                cleanupAssets()
                 UIManager:show(InfoMessage:new{ text = _("Failed to save story."), timeout = 3 })
                 return
             end
 
+            cleanupAssets()
             UIManager:show(InfoMessage:new{ text = string.format(_("Saved to: %s"), target_path), timeout = 3 })
         end, { silent = true })
         return
