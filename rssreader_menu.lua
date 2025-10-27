@@ -1115,9 +1115,54 @@ function MenuBuilder:collectFeedIdsForNode(node)
     return feed_ids
 end
 
+local function triggerHoldCallback(_, item)
+    if item and type(item.hold_callback) == "function" then
+        item.hold_callback()
+    end
+    return true
+end
+
 function MenuBuilder:createLongPressMenuForNode(account, client, node, normal_callback)
-    -- Temporarily disable long-press menus - make long-press behave like short-press
-    return {}
+    if not node or node.kind ~= "feed" then
+        return
+    end
+
+    local account_type = account and account.type
+    if account_type ~= "newsblur" and account_type ~= "commafeed" then
+        return
+    end
+
+    local dialog
+    dialog = ButtonDialog:new{
+        title = node.title or _("Feed"),
+        buttons = {{
+            {
+                text = _("Open"),
+                callback = function()
+                    UIManager:close(dialog)
+                    if type(normal_callback) == "function" then
+                        normal_callback()
+                    end
+                end,
+            },
+            {
+                text = _("Mark all as read"),
+                callback = function()
+                    UIManager:close(dialog)
+                    self:performMarkAllAsRead(account, client, node)
+                end,
+            },
+            {
+                text = _("Close"),
+                callback = function()
+                    UIManager:close(dialog)
+                end,
+            },
+        }},
+    }
+
+    UIManager:show(dialog)
+    return dialog
 end
 
 function MenuBuilder:showMarkAllAsReadDialogForAccount(account)
@@ -1271,16 +1316,6 @@ function MenuBuilder:performMarkAllAsRead(account, client, node)
     local account_type = account and account.type
 
     if node_type == "feed" then
-        -- Check if feed-level mark all as read is supported
-        local account_type = account and account.type
-        if account_type == "commafeed" then
-            UIManager:show(InfoMessage:new{
-                text = _("Feed-level mark all as read is not supported for CommaFeed accounts."),
-                timeout = 3,
-            })
-            return
-        end
-        
         -- Mark single feed as read
         UIManager:show(InfoMessage:new{
             text = string.format(_("Marking feed '%s' as read..."), node.title or _("Feed")),
@@ -1936,6 +1971,10 @@ function MenuBuilder:showNewsBlurNode(account, client, node)
             table.insert(entries, {
                 text = display_title,
                 callback = normal_callback,
+                hold_callback = function()
+                    self:createLongPressMenuForNode(account, client, child, normal_callback)
+                end,
+                hold_keep_menu_open = true,
             })
         end
     end
@@ -1950,10 +1989,15 @@ function MenuBuilder:showNewsBlurNode(account, client, node)
     local menu_instance = Menu:new{
         title = node and node.title or (account and account.name) or _("NewsBlur"),
         item_table = entries,
+        onMenuHold = triggerHoldCallback,
     }
     self:showMenu(menu_instance, function()
         self:showNewsBlurNode(account, client, node)
     end)
+
+    if menu_instance then
+        menu_instance.onMenuHold = triggerHoldCallback
+    end
 end
 
 function MenuBuilder:showNewsBlurFeed(account, client, feed_node, opts)
@@ -2198,8 +2242,19 @@ function MenuBuilder:showCommaFeedNode(account, client, node)
             table.insert(entries, {
                 text = display_title,
                 callback = normal_callback,
+                hold_callback = function()
+                    self:createLongPressMenuForNode(account, client, child, normal_callback)
+                end,
+                hold_keep_menu_open = true,
             })
         end
+    end
+
+    local function menu_hold_handler(_, item)
+        if item and type(item.hold_callback) == "function" then
+            item.hold_callback()
+        end
+        return true
     end
 
     if #entries == 0 then
@@ -2212,10 +2267,15 @@ function MenuBuilder:showCommaFeedNode(account, client, node)
     local menu_instance = Menu:new{
         title = node and node.title or (account and account.name) or _("CommaFeed"),
         item_table = entries,
+        onMenuHold = triggerHoldCallback,
     }
     self:showMenu(menu_instance, function()
         self:showCommaFeedNode(account, client, node)
     end)
+
+    if menu_instance then
+        menu_instance.onMenuHold = triggerHoldCallback
+    end
 end
 
 function MenuBuilder:showCommaFeedFeed(account, client, feed_node, opts)

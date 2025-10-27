@@ -440,8 +440,9 @@ function CommaFeed:markFeedAsRead(feed_id)
     if not feed_id then
         return false, "Missing feed identifier."
     end
-    return self:performRestRequest("POST", "/feed/markAllAsRead", {
+    return self:performRestRequest("POST", "/feed/mark", nil, {
         id = tostring(feed_id),
+        read = true,
     })
 end
 
@@ -449,7 +450,7 @@ function CommaFeed:markCategoryAsRead(category_id)
     if not category_id then
         return false, "Missing category identifier."
     end
-    return self:performRestRequest("POST", "/category/markAllAsRead", {
+    return self:performRestRequest("POST", "/category/markAllAsRead", nil, {
         id = tostring(category_id),
     })
 end
