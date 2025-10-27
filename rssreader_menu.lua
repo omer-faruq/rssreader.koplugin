@@ -27,6 +27,8 @@ local StoryViewer = require("rssreader_story_viewer")
 local FeedFetcher = require("rssreader_feed_fetcher")
 local HtmlSanitizer = require("rssreader_html_sanitizer")
 local HtmlResources = require("rssreader_html_resources")
+local FiveFiltersSanitizer = require("sanitizers/rssreader_sanitizer_fivefilters")
+local DiffbotSanitizer = require("sanitizers/rssreader_sanitizer_diffbot")
 
 local function loadEpubDownloadBackend()
     local candidates = {
@@ -67,38 +69,6 @@ local function replaceRightSingleQuoteEntities(text)
         return ENTITY_REPLACEMENTS[entity] or entity
     end)
     return replaced
-end
-
-local function hasLikelyXmlStructure(content)
-    if type(content) ~= "string" then
-        return false
-    end
-    local trimmed = content:gsub("^[%s%c]+", ""):gsub("[%s%c]+$", "")
-    if trimmed == "" then
-        return false
-    end
-    if trimmed:sub(1, 1) ~= "<" then
-        return false
-    end
-    if trimmed:find("<item", 1, true) or trimmed:find("<entry", 1, true) then
-        return true
-    end
-    if trimmed:find("<rss", 1, true) or trimmed:find("<feed", 1, true) then
-        return true
-    end
-    return false
-end
-
-local function fiveFiltersContentIsMeaningful(html)
-    if type(html) ~= "string" then
-        return false
-    end
-    local trimmed = html:gsub("^[%s%c]+", ""):gsub("[%s%c]+$", "")
-    if trimmed == "" then
-        return false
-    end
-    local minimum_length = 200
-    return trimmed:len() >= minimum_length
 end
 
 local function findNextIndex(stories, start_index, predicate)
@@ -501,17 +471,8 @@ local function collectActiveSanitizers(builder)
     return ordered
 end
 
-local function sanitizeFiveFiltersHtml(html)
-    if type(html) ~= "string" or html == "" then
-        return html
-    end
-    html = html:gsub("%s*<p>%s*<strong>%s*<a%s+href=\"https://blockads%.fivefilters%.org\">Adblock%s+test</a>%s*</strong>%s*<a%s+href=\"https://blockads%.fivefilters%.org/acceptable%.html\">%(Why%?%)</a>%s*</p>%s*", "")
-    return html
-end
-
 local function writeStoryHtmlFile(html, filepath, title)
     if type(html) == "string" and html ~= "" then
-        html = sanitizeFiveFiltersHtml(html)
         html = HtmlSanitizer.disableFontSizeDeclarations(html)
     end
     local file = io.open(filepath, "w")
@@ -654,82 +615,6 @@ local function shouldUseFiveFilters(builder)
     return flag and true or false
 end
 
-local function buildFiveFiltersUrl(link)
-    if type(link) ~= "string" or link == "" then
-        return nil
-    end
-    local encoded = util.urlEncode(link)
-    if not encoded or encoded == "" then
-        return nil
-    end
-    return string.format("https://ftr.fivefilters.net/makefulltextfeed.php?step=3&fulltext=1&url=%s&max=3&links=preserve&exc=1&submit=Create+Feed", encoded)
-end
-
-local function detectFiveFiltersBlocked(content)
-    if type(content) ~= "string" then
-        return false
-    end
-    return content:find("URL blocked", 1, true) ~= nil
-end
-
-local function extractFiveFiltersHtml(xml_content)
-    if type(xml_content) ~= "string" or xml_content == "" then
-        return nil
-    end
-
-    local item_block = xml_content:match("<item[^>]*>(.-)</item>")
-    if not item_block then
-        return nil
-    end
-
-    local function extractTagContent(block, tag)
-        local pattern = string.format("<%s[^>]*>(.-)</%s>", tag, tag)
-        local value = block:match(pattern)
-        if not value then
-            return nil
-        end
-        value = value:gsub("^%s+", ""):gsub("%s+$", "")
-        local cdata = value:match("^<!%[CDATA%[(.*)%]%]>$")
-        if cdata then
-            value = cdata
-        end
-        return value
-    end
-
-    local title_text = util.htmlEntitiesToUtf8(extractTagContent(item_block, "title") or "")
-    local description_text = extractTagContent(item_block, "description") or ""
-
-    if description_text == "" then
-        return nil
-    end
-
-    description_text = util.htmlEntitiesToUtf8(description_text)
-    description_text = description_text:gsub("&lt;", "<"):gsub("&gt;", ">")
-
-    local placeholder_marker = "[unable to retrieve full-text content]"
-    if description_text:lower():find(placeholder_marker, 1, true) then
-        return nil
-    end
-
-    local fragments = {}
-    if title_text ~= "" then
-        table.insert(fragments, string.format("<h3>%s</h3>", title_text))
-    end
-    table.insert(fragments, description_text)
-    return table.concat(fragments, "")
-end
-
-local function rewriteFiveFiltersHtml(html)
-    if type(html) ~= "string" or html == "" then
-        return nil
-    end
-    local trimmed = html:gsub("^[%s%c]+", ""):gsub("[%s%c]+$", "")
-    if trimmed == "" then
-        return nil
-    end
-    return trimmed
-end
-
 local function fetchViaHttp(link, on_complete)
     local sink = {}
     socketutil:set_timeout(socketutil.LARGE_BLOCK_TIMEOUT, socketutil.LARGE_TOTAL_TIMEOUT)
@@ -797,6 +682,12 @@ local function fetchStoryContent(story, builder, on_complete, options)
                 raw_html = rewriteRelativeResourceUrls(raw_html, link)
                 raw_html = HtmlSanitizer.disableFontSizeDeclarations(raw_html)
 
+                local title = resolveStoryDocumentTitle(story)
+                if type(raw_html) == "string" and raw_html ~= "" and type(title) == "string" and title ~= "" then
+                    local heading = string.format("<h3>%s</h3>", util.htmlEscape(title))
+                    raw_html = heading .. raw_html
+                end
+
                 local html_for_epub = raw_html
 
                 local download_info
@@ -819,9 +710,6 @@ local function fetchStoryContent(story, builder, on_complete, options)
                     end
                 end
 
-                if type(html_for_epub) == "string" and html_for_epub ~= "" then
-                    html_for_epub = sanitizeFiveFiltersHtml(html_for_epub)
-                end
                 local epub_document = wrapHtmlForEpub(html_for_epub, resolveStoryDocumentTitle(story))
 
                 download_info = download_info or {}
@@ -861,7 +749,7 @@ local function fetchStoryContent(story, builder, on_complete, options)
 
                 local sanitizer_type = sanitizer.type and sanitizer.type:lower() or ""
                 if sanitizer_type == "fivefilters" then
-                    local fivefilters_url = buildFiveFiltersUrl(link)
+                    local fivefilters_url = FiveFiltersSanitizer.buildUrl(link)
                     if not fivefilters_url then
                         processSanitizer(index + 1)
                         return
@@ -873,18 +761,18 @@ local function fetchStoryContent(story, builder, on_complete, options)
                             return
                         end
 
-                        if not hasLikelyXmlStructure(content) then
+                        if not FiveFiltersSanitizer.hasLikelyXmlStructure(content) then
                             processSanitizer(index + 1)
                             return
                         end
 
-                        if detectFiveFiltersBlocked(content) then
+                        if FiveFiltersSanitizer.detectBlocked(content) then
                             processSanitizer(index + 1)
                             return
                         end
 
-                        local fivefilters_html = rewriteFiveFiltersHtml(extractFiveFiltersHtml(content))
-                        if not fivefilters_html or not fiveFiltersContentIsMeaningful(fivefilters_html) then
+                        local fivefilters_html = FiveFiltersSanitizer.rewriteHtml(FiveFiltersSanitizer.extractHtml(content))
+                        if not fivefilters_html or not FiveFiltersSanitizer.contentIsMeaningful(fivefilters_html) then
                             processSanitizer(index + 1)
                             return
                         end
@@ -892,8 +780,30 @@ local function fetchStoryContent(story, builder, on_complete, options)
                         finalizeContent(fivefilters_html, true)
                     end)
                 elseif sanitizer_type == "diffbot" then
-                    logger.info("RSSReader", "Diffbot sanitizer not yet implemented; skipping")
-                    processSanitizer(index + 1)
+                    local diffbot_url = DiffbotSanitizer.buildUrl(sanitizer, link)
+                    if not diffbot_url then
+                        logger.info("RSSReader", "Diffbot sanitizer misconfigured; skipping")
+                        processSanitizer(index + 1)
+                        return
+                    end
+
+                    DiffbotSanitizer.fetchContent(diffbot_url, function(content, err)
+                        if not content then
+                            processSanitizer(index + 1)
+                            return
+                        end
+
+                        local diffbot_html, diffbot_meta = DiffbotSanitizer.parseResponse(content)
+                        if type(diffbot_meta) == "table" then
+                            -- no-op; retained for compatibility, meta ignored currently
+                        end
+                        if not diffbot_html or not DiffbotSanitizer.contentIsMeaningful(diffbot_html) then
+                            processSanitizer(index + 1)
+                            return
+                        end
+
+                        finalizeContent(diffbot_html, true)
+                    end)
                 else
                     logger.info("RSSReader", "Unknown sanitizer type", sanitizer.type)
                     processSanitizer(index + 1)

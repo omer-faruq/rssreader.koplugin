@@ -30,12 +30,18 @@ return {
             active = false, -- set to true to enable this account
         },
     },
-    sanitizers = { -- available types = fivefilters
+    sanitizers = { -- available types = fivefilters, diffbot
         {
             order = 1,
             type = "fivefilters",
             active = true,
-        }
+        },
+        {
+            order = 2,
+            type = "diffbot",
+            active = false,
+            token = "your_diffbot_token",
+        },
     },
     features = {
         default_folder_on_save = nil, -- set a folder to save new feeds to, if nil then default is home folder

@@ -26,6 +26,14 @@ The other Lua files handle internal logic. End users do not need to open or modi
 - The account list reflects the entries you configured; tap to open, long-press for more options.
 - For local accounts, the groups and feeds defined in your renamed `rssreader_local_defaults.lua` appear. Editing the URLs here is how you add new sources.
 
+## Content Sanitizers
+Sanitizers fetch and normalize full-page article HTML before it is shown in KOReader. When you open a story the plugin iterates over the active sanitizers in the order configured under `sanitizers` in `rssreader_configuration.lua`. Each sanitizer tries to produce cleaned HTML; if it fails (for example, by returning empty content or hitting an error) the plugin automatically falls back to the next sanitizer in the list, and eventually to the original feed content if none succeed.
+
+- **Diffbot** – Uses the Diffbot Analyze API to extract article bodies. Diffbot requires a token tied to a work e-mail domain and the free tier currently grants **10,000 credits per month**. Set the token (and optional parameters such as `mode`) in the sanitizer configuration entry.
+- **FiveFilters** – Calls the FiveFilters Full-Text RSS endpoint. No account or token is required; you simply enable the sanitizer in the configuration.
+
+Mix and match the sanitizers to suit your feeds. Keep the most reliable option first so it is attempted before the fallbacks.
+
 ### Mark All as Read
 - **Long-press any feed title** to open the contextual menu.
 - Choose **Mark all as read** to update the read state for every story in that feed. 
