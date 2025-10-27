@@ -93,9 +93,6 @@ function FiveFiltersSanitizer.extractHtml(xml_content)
     end
 
     local fragments = {}
-    if title_text ~= "" then
-        table.insert(fragments, string.format("<h3>%s</h3>", title_text))
-    end
     table.insert(fragments, description_text)
 
     return table.concat(fragments, "")
