@@ -27,6 +27,13 @@ The other Lua files handle internal logic. End users do not need to open or modi
 - In the feed list, a long press lets you open the original website, save the article, or toggle read/unread.
 - For local accounts, the groups and feeds defined in your renamed `rssreader_local_defaults.lua` appear. Editing the URLs here is how you add new sources.
 
+## Image Download Settings
+The `features` block in `rssreader_configuration.lua` controls how the plugin fetches and displays article images. Three switches let you balance visual richness with bandwidth and storage:
+
+- **`download_images_when_sanitize_successful`** – When the active sanitizer returns cleaned HTML, enable this to download the referenced images alongside the sanitized content. Disable it if you prefer faster syncs or limited storage usage.
+- **`download_images_when_sanitize_unsuccessful`** – Determines whether images should still be fetched when sanitizers fail and the original feed HTML is used instead. Turn it on if you want images even without sanitized content; leave it off to avoid extra downloads in fallback scenarios.
+- **`show_images_in_preview`** – Controls whether images appear in the story preview screen. Disable to prioritize text-only previews or reduce clutter; enable to keep the original illustrations visible while browsing stories.
+
 ## Content Sanitizers
 Sanitizers fetch and normalize full-page article HTML before it is shown in KOReader. When you open a story the plugin iterates over the active sanitizers in the order configured under `sanitizers` in `rssreader_configuration.lua`. Each sanitizer tries to produce cleaned HTML; if it fails (for example, by returning empty content or hitting an error) the plugin automatically falls back to the next sanitizer in the list, and eventually to the original feed content if none succeed.
 
