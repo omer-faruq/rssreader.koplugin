@@ -90,10 +90,26 @@ function HtmlResources.prepareAssetPaths(base_dir, base_name)
     }
 end
 
-local function replaceSrcAttribute(tag, new_src)
-    local replaced, count = tag:gsub('([Ss][Rr][Cc]%s*=%s*")([^"]*)(")', '%1' .. new_src .. '%3', 1)
+local function replaceAttributeValue(tag, attribute, new_value)
+    local attr_pattern = attribute:gsub("%-", "%%-")
+    local updated, count = tag:gsub(attr_pattern .. '%s*=%s*"([^"]*)"', attribute .. '="' .. new_value .. '"', 1)
     if count == 0 then
-        replaced = tag:gsub("([Ss][Rr][Cc]%s*=%s*')([^']*)(')", "%1" .. new_src .. "%3", 1)
+        updated = tag:gsub(attr_pattern .. "%s*=%s*'([^']*)'", attribute .. "='" .. new_value .. "'", 1)
+    end
+    return updated
+end
+
+local function replaceSrcAttribute(tag, new_src)
+    local function replacer(prefix, attr, _, suffix)
+        return prefix .. attr .. new_src .. suffix
+    end
+
+    local replaced, count = tag:gsub('([%s<])([Ss][Rr][Cc]%s*=%s*")([^"]*)(")', replacer, 1)
+    if count == 0 then
+        replaced, count = tag:gsub("([%s<])([Ss][Rr][Cc]%s*=%s*')([^']*)(')", replacer, 1)
+    end
+    if count == 0 then
+        replaced = tag:gsub("(<%s*[Ii][Mm][Gg])", "%1 src=\"" .. new_src .. "\"", 1)
     end
     return replaced
 end
@@ -166,11 +182,37 @@ function HtmlResources.downloadAndRewrite(html, page_url, asset_paths)
     local imagenum = 1
 
     local function processTag(img_tag)
-        local original_src = img_tag:match('[Ss][Rr][Cc]%s*=%s*"([^"]*)"')
-        if not original_src then
-            original_src = img_tag:match("[Ss][Rr][Cc]%s*=%s*'([^']*)')")
+        local original_src
+        local original_attribute
+
+        local function consider(value, attribute)
+            if value and value ~= "" then
+                original_src = value
+                original_attribute = attribute
+                return true
+            end
+            return false
         end
-        if not original_src or original_src == "" then
+
+        consider(img_tag:match('[%s<][Ss][Rr][Cc]%s*=%s*"([^"]*)"'), "src")
+        if not original_src then
+            consider(img_tag:match("[%s<][Ss][Rr][Cc]%s*=%s*'([^']*)'"), "src")
+        end
+
+        if not original_src then
+            local data_attributes = { "data-src", "data-original", "data-lazy-src" }
+            for _, attribute in ipairs(data_attributes) do
+                local pattern_base = attribute:gsub("%-", "%%-")
+                if consider(img_tag:match(pattern_base .. '%s*=%s*"([^"]*)"'), attribute) then
+                    break
+                end
+                if consider(img_tag:match(pattern_base .. "%s*=%s*'([^']*)'"), attribute) then
+                    break
+                end
+            end
+        end
+
+        if not original_src then
             return img_tag
         end
 
@@ -222,7 +264,11 @@ function HtmlResources.downloadAndRewrite(html, page_url, asset_paths)
             relative_src = relative_src,
         }
 
-        return replaceSrcAttribute(img_tag, relative_src)
+        local updated_tag = replaceSrcAttribute(img_tag, relative_src)
+        if original_attribute and original_attribute ~= "src" then
+            updated_tag = replaceAttributeValue(updated_tag, original_attribute, relative_src)
+        end
+        return updated_tag
     end
 
     local rewritten = html:gsub("(<%s*[Ii][Mm][Gg][^>]*>)", processTag)
