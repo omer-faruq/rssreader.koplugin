@@ -512,6 +512,7 @@ function StoryViewer:showStory(story, on_action, on_close, options)
     local heading_html = "<h3>" .. heading_title .. "</h3>"
 
     local show_images = options and options.show_images_in_preview and true or false
+    local screen_width = Device.screen:getWidth()
 
     local preview_image_url
     if show_images then
@@ -525,7 +526,17 @@ function StoryViewer:showStory(story, on_action, on_close, options)
     if preview_image_url then
         local escaped_url = escapeHtmlAttribute(preview_image_url)
         local alt_text = escapeHtmlAttribute(base_title or "")
-        preview_fragment = string.format('<figure class="rss-preview-image"><img src="%s" alt="%s"/></figure>', escaped_url, alt_text)
+        local min_width_px = 0
+        if type(screen_width) == "number" and screen_width > 0 then
+            min_width_px = math.floor(5 * screen_width / 6)
+        end
+        local width_style = ""
+        local width_attr = ""
+        if min_width_px > 0 then
+            width_style = string.format("width:%dpx;", min_width_px)
+            width_attr = string.format(' width="%d"', min_width_px)
+        end
+        preview_fragment = string.format('<figure class="rss-preview-image" style="display:flex;justify-content:center;margin:0 0 1em;"><img src="%s" alt="%s"%s style="%smax-width:100%%;height:auto;"/></figure><br>', escaped_url, alt_text, width_attr, width_style)
     end
 
     html = heading_html .. preview_fragment .. (html or "")
@@ -565,7 +576,6 @@ function StoryViewer:showStory(story, on_action, on_close, options)
         return
     end
 
-    local screen_width = Device.screen:getWidth()
     local screen_height = Device.screen:getHeight()
     local width = screen_width - Size.padding.fullscreen * 2
     local height = screen_height - Size.padding.fullscreen * 2
