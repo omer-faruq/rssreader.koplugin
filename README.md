@@ -2,6 +2,8 @@
 
 The KOReader **RSS Reader** plugin lets you follow RSS feeds from a single screen. For everyday use you only need to define your account and pick the local feeds you care about.
 
+https://github.com/user-attachments/assets/9fa52ff9-2e5a-47f1-a207-db5e2cd80d7e
+
 ## Who Is It For?
 - **Readers who want to add their own RSS accounts**
 - **Users who prefer to use the local feed bundles**
@@ -37,7 +39,7 @@ The `features` block in `rssreader_configuration.lua` controls how the plugin fe
 ## Content Sanitizers
 Sanitizers fetch and normalize full-page article HTML before it is shown in KOReader. When you open a story the plugin iterates over the active sanitizers in the order configured under `sanitizers` in `rssreader_configuration.lua`. Each sanitizer tries to produce cleaned HTML; if it fails (for example, by returning empty content or hitting an error) the plugin automatically falls back to the next sanitizer in the list, and eventually to the original feed content if none succeed.
 
-- **Diffbot** – Uses the Diffbot Analyze API to extract article bodies. Diffbot requires a token tied to a work e-mail domain and the free tier currently grants **10,000 credits per month**. Set the token (and optional parameters such as `mode`) in the sanitizer configuration entry.
+- **Diffbot** – Uses the Diffbot Analyze API to extract article bodies. Diffbot requires a token tied to a work e-mail domain and the free tier currently grants **10,000 credits per month**. Set the token in the sanitizer configuration entry.
 - **FiveFilters** – Calls the FiveFilters Full-Text RSS endpoint. No account or token is required; you simply enable the sanitizer in the configuration.
 
 Mix and match the sanitizers to suit your feeds. Keep the most reliable option first so it is attempted before the fallbacks.
