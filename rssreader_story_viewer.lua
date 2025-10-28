@@ -624,12 +624,21 @@ function StoryViewer:showStory(story, on_action, on_close, options)
         html_height = Screen:scaleBySize(120)
     end
 
+    local story_css = table.concat({
+        "body {",
+        "  margin-left: 0 !important;",
+        "  margin-right: 0 !important;",
+        "  padding-left: 0 !important;",
+        "  padding-right: 0 !important;",
+        "}",
+    }, "\n")
+
     local html_widget = ScrollHtmlWidget:new{
         dialog = nil,
         width = width,
         height = html_height,
         html_body = html,
-        css = nil,
+        css = story_css,
         is_xhtml = true,
         html_resource_directory = temp_dir,
     }
