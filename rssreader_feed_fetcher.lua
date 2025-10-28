@@ -60,6 +60,50 @@ local function sanitize(value)
     return value
 end
 
+local function sanitizeImageUrl(url_value)
+    if not url_value then
+        return nil
+    end
+    if type(url_value) == "table" then
+        url_value = url_value.url or url_value.href or url_value.src
+    end
+    if type(url_value) ~= "string" then
+        return nil
+    end
+    url_value = stripCData(url_value)
+    if not url_value then
+        return nil
+    end
+    url_value = util.htmlEntitiesToUtf8(url_value)
+    url_value = util.trim(url_value or "")
+    if url_value == "" then
+        return nil
+    end
+    if url_value:find("^data:") then
+        return nil
+    end
+    return url_value
+end
+
+local function insertImageCandidate(result, image_url)
+    local sanitized = sanitizeImageUrl(image_url)
+    if not sanitized then
+        return
+    end
+    result.story_image = result.story_image or sanitized
+    result.image = result.image or sanitized
+    if not result.image_urls then
+        result.image_urls = { sanitized }
+    else
+        for _, existing in ipairs(result.image_urls) do
+            if existing == sanitized then
+                return
+            end
+        end
+        table.insert(result.image_urls, sanitized)
+    end
+end
+
 local function decodeAtomBody(body, attrs)
     if not body then
         return nil
@@ -135,12 +179,22 @@ local function parseRSS(content)
             pub_date = util.trim(pub_date)
         end
         if title or link or body then
-            table.insert(items, {
+            local result = {
                 story_title = title or link or "Untitled",
                 permalink = link,
                 story_content = body,
                 date = pub_date,
-            })
+            }
+
+            insertImageCandidate(result, raw:match("<media:content[^>]-url%s*=%s*['\"](.-)['\"]"))
+            insertImageCandidate(result, raw:match("<media:thumbnail[^>]-url%s*=%s*['\"](.-)['\"]"))
+            local enclosure = raw:match("<enclosure[^>]-type%s*=%s*['\"]image/[^'\"]*['\"][^>]*>")
+            if enclosure then
+                insertImageCandidate(result, enclosure:match("url%s*=%s*['\"](.-)['\"]"))
+            end
+            insertImageCandidate(result, raw:match("<itunes:image[^>]-href%s*=%s*['\"](.-)['\"]"))
+
+            table.insert(items, result)
         end
     end
     return items
@@ -160,12 +214,24 @@ local function parseAtom(content)
             pub_date = util.trim(pub_date)
         end
         if title or link or body then
-            table.insert(items, {
+            local result = {
                 story_title = title or link or "Untitled",
                 permalink = link,
                 story_content = stripCData(body),
                 date = pub_date,
-            })
+            }
+
+            insertImageCandidate(result, raw:match("<media:content[^>]-url%s*=%s*['\"](.-)['\"]"))
+            insertImageCandidate(result, raw:match("<media:thumbnail[^>]-url%s*=%s*['\"](.-)['\"]"))
+            for attrs in raw:gmatch("<link%s+([^>]-)/?>") do
+                local rel = attrs:match("rel%s*=%s*['\"](.-)['\"]")
+                local type_attr = attrs:match("type%s*=%s*['\"](.-)['\"]")
+                if rel and rel:lower() == "enclosure" and type_attr and type_attr:lower():find("image/") then
+                    insertImageCandidate(result, attrs:match("href%s*=%s*['\"](.-)['\"]"))
+                end
+            end
+
+            table.insert(items, result)
         end
     end
     return items
@@ -186,12 +252,26 @@ local function parseJSON(content)
             pub_date = util.trim(pub_date)
         end
         if title or link or body then
-            table.insert(items, {
+            local result = {
                 story_title = title or link or "Untitled",
                 permalink = link,
                 story_content = stripCData(body),
                 date = pub_date,
-            })
+            }
+
+            insertImageCandidate(result, item.image or item.banner_image or item.thumbnail)
+            if type(item.attachments) == "table" then
+                for _, attachment in ipairs(item.attachments) do
+                    if type(attachment) == "table" and type(attachment.url) == "string" then
+                        local mime = attachment.mime_type or attachment.type
+                        if not mime or mime:lower():find("image/") then
+                            insertImageCandidate(result, attachment.url)
+                        end
+                    end
+                end
+            end
+
+            table.insert(items, result)
         end
     end
     return items

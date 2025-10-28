@@ -40,12 +40,13 @@ return {
             order = 2,
             type = "diffbot",
             active = false,
-            token = "your_diffbot_token",
+            token = "your_diffbot_token", -- get your token here: https://app.diffbot.com/
         },
     },
     features = {
         default_folder_on_save = nil, -- set a folder to save new feeds to, if nil then default is home folder
         download_images_when_sanitize_successful = true, -- if sanitize functionality is successful, download images
-        download_images_when_sanitize_unsuccessful = true, -- if sanitize functionality is unsuccessful, download images (for the original html file)
+        download_images_when_sanitize_unsuccessful = false, -- if sanitize functionality is unsuccessful, download images (for the original html file)
+        show_images_in_preview = false, -- show images in preview screen
     },
 }

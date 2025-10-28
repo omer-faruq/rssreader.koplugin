@@ -430,6 +430,35 @@ local function buildCacheDirectory()
     return base_dir
 end
 
+local function ensureActiveDirectory(target_dir)
+    if type(target_dir) ~= "string" or target_dir == "" then
+        return
+    end
+    if lfs.attributes(target_dir, "mode") ~= "directory" then
+        return
+    end
+    if FileManager and FileManager.instance and FileManager.instance.file_chooser and type(FileManager.instance.file_chooser.changeToPath) == "function" then
+        FileManager.instance.file_chooser:changeToPath(target_dir)
+    end
+    if G_reader_settings and type(G_reader_settings.saveSetting) == "function" then
+        G_reader_settings:saveSetting("lastdir", target_dir)
+    end
+end
+
+local function pickActiveDirectory(cache_dir)
+    local home_dir = G_reader_settings and G_reader_settings:readSetting("home_dir")
+    if type(home_dir) == "string" and home_dir ~= "" and util.directoryExists(home_dir) then
+        return home_dir
+    end
+    local device_home = Device and Device.home_dir
+    if type(device_home) == "string" and device_home ~= "" and util.directoryExists(device_home) then
+        return device_home
+    end
+    if type(cache_dir) == "string" and cache_dir ~= "" and util.directoryExists(cache_dir) then
+        return cache_dir
+    end
+end
+
 local function getFeatureFlag(builder, key)
     if not builder or not builder.accounts or not builder.accounts.config then
         return nil
@@ -941,6 +970,12 @@ function MenuBuilder:showStory(stories, index, on_action, on_close, options, con
             end
         end
     end
+    local show_images_in_preview = false
+    if self.accounts and self.accounts.config then
+        local flag = util.tableGetValue(self.accounts.config, "features", "show_images_in_preview")
+        show_images_in_preview = flag == true
+    end
+
     self.story_viewer:showStory(story, function(action, payload)
         self:handleStoryAction(stories, index, action, payload, context)
     end, function()
@@ -969,6 +1004,7 @@ function MenuBuilder:showStory(stories, index, on_action, on_close, options, con
         disable_story_mutators = disable_mutators,
         is_api_version = is_api_context,
         allow_mark_unread = allow_mark_unread,
+        show_images_in_preview = show_images_in_preview,
     })
 end
 
@@ -2145,6 +2181,10 @@ end
 
 function MenuBuilder:clearCacheDirectory()
     local cache_dir = buildCacheDirectory()
+    local active_dir = pickActiveDirectory(cache_dir)
+    if active_dir then
+        ensureActiveDirectory(active_dir)
+    end
     local ok, err = ffiUtil.purgeDir(cache_dir)
     if not ok then
         logger.warn("RSSReader", "Failed to clear cache directory", err)

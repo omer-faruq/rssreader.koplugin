@@ -18,6 +18,8 @@ local logger = require("logger")
 local util = require("util")
 local lfs = require("libs/libkoreader-lfs")
 local _ = require("gettext")
+local HtmlResources = require("rssreader_html_resources")
+local urlmod = require("socket.url")
 
 local Screen = Device.screen
 
@@ -52,6 +54,53 @@ local function parseReadFlag(value)
     return nil
 end
 
+local function resolveStoryLink(story)
+    if type(story) ~= "table" then
+        return nil
+    end
+    return story.permalink or story.href or story.link or story.story_permalink or story.url
+end
+
+local function rewriteRelativeResourceUrls(html, page_url)
+    if type(html) ~= "string" or html == "" then
+        return html
+    end
+    if type(page_url) ~= "string" or page_url == "" then
+        return html
+    end
+
+    local function isRelativeTarget(value)
+        if not value or value == "" then
+            return false
+        end
+        local first = value:sub(1, 1)
+        if first == "#" or first == "?" then
+            return false
+        end
+        if value:match("^[%w][%w%+%-.]*:") then
+            return false
+        end
+        return true
+    end
+
+    local function absolutizeAttribute(pattern)
+        html = html:gsub(pattern, function(prefix, value, suffix)
+            if isRelativeTarget(value) then
+                local resolved = urlmod.absolute(page_url, value)
+                if resolved and resolved ~= "" then
+                    return prefix .. resolved .. suffix
+                end
+            end
+            return prefix .. value .. suffix
+        end)
+    end
+
+    absolutizeAttribute("(<%s*[^>]-[Hh][Rr][Ee][Ff]%s*=%s*['\"])%s*(.-)%s*([\"'])")
+    absolutizeAttribute("(<%s*[^>]-[Ss][Rr][Cc]%s*=%s*['\"])%s*(.-)%s*([\"'])")
+
+    return html
+end
+
 local function storyIsUnread(story)
     if type(story) ~= "table" then
         return false
@@ -77,6 +126,92 @@ local function replaceRightSingleQuoteEntities(text)
         return ENTITY_REPLACEMENTS[entity] or entity
     end)
     return replaced
+end
+
+local function normalizeImageUrl(value)
+    if type(value) == "table" then
+        value = value.url or value.href or value.src
+    end
+    if type(value) ~= "string" then
+        return nil
+    end
+    local util_strip = type(util) == "table" and type(rawget(util, "stripCData")) == "function" and rawget(util, "stripCData") or nil
+    if util_strip then
+        value = util_strip(value)
+    else
+        local global_strip = rawget(_G, "stripCData")
+        if type(global_strip) == "function" then
+            value = global_strip(value)
+        end
+    end
+    value = util.htmlEntitiesToUtf8(value or "")
+    value = util.trim(value or "")
+    if value == "" or value:find("^data:") then
+        return nil
+    end
+    return value
+end
+
+local function pickPreviewImage(story)
+    if type(story) ~= "table" then
+        return nil
+    end
+    local tried = {}
+    local function consider(value)
+        local candidate = normalizeImageUrl(value)
+        if candidate and not tried[candidate] then
+            return candidate
+        end
+    end
+
+    local direct_candidates = {
+        story.preview_image,
+        story.primary_image,
+        story.story_image,
+        story.image,
+        story.thumbnail,
+        story.media_thumbnail,
+        story.media_content,
+    }
+    for _, candidate in ipairs(direct_candidates) do
+        local chosen = consider(candidate)
+        if chosen then
+            return chosen
+        end
+    end
+
+    if type(story.image_urls) == "table" then
+        for _, candidate in ipairs(story.image_urls) do
+            local chosen = consider(candidate)
+            if chosen then
+                return chosen
+            end
+        end
+    end
+
+    return nil
+end
+
+local function htmlContainsImageSrc(html, image_url)
+    if type(html) ~= "string" or type(image_url) ~= "string" then
+        return false
+    end
+    local escaped = image_url:gsub("([^%w])", "%%%1")
+    local pattern = "<[Ii][Mm][Gg][^>]-[Ss][Rr][Cc]%s*=%s*[\"']%s*" .. escaped .. "%s*[\"']"
+    return html:match(pattern) ~= nil
+end
+
+local function escapeHtmlAttribute(value)
+    if type(value) ~= "string" then
+        return ""
+    end
+    return (value:gsub("[&\"'<>]", {
+        ["&"] = "&amp;",
+        ['"'] = "&quot;",
+        ["'"] = "&#39;",
+        ["<"] = "&lt;",
+        [">"] = "&gt;",
+    }))
 end
 
 local function formatStoryDate(story)
@@ -230,8 +365,11 @@ end
 local story_temp_counter = 0
 
 local function ensureTempDirectory()
-    local temp_dir = lfs.currentdir() .. "/cache/rssreader"
-    util.makePath(temp_dir)
+    local temp_dir = HtmlResources.ensureBaseDirectory()
+    if not temp_dir then
+        temp_dir = lfs.currentdir() .. "/cache/rssreader"
+        util.makePath(temp_dir)
+    end
     return temp_dir
 end
 
@@ -371,10 +509,58 @@ function StoryViewer:showStory(story, on_action, on_close, options)
     if date_str then
         heading_title = heading_title .. " - " .. date_str
     end
-    html = "<h3>" .. heading_title .. "</h3>" .. html
+    local heading_html = "<h3>" .. heading_title .. "</h3>"
+
+    local show_images = options and options.show_images_in_preview and true or false
+
+    local preview_image_url
+    if show_images then
+        preview_image_url = pickPreviewImage(story)
+        if preview_image_url and htmlContainsImageSrc(html, preview_image_url) then
+            preview_image_url = nil
+        end
+    end
+
+    local preview_fragment = ""
+    if preview_image_url then
+        local escaped_url = escapeHtmlAttribute(preview_image_url)
+        local alt_text = escapeHtmlAttribute(base_title or "")
+        preview_fragment = string.format('<figure class="rss-preview-image"><img src="%s" alt="%s"/></figure>', escaped_url, alt_text)
+    end
+
+    html = heading_html .. preview_fragment .. (html or "")
+
+    local temp_dir = ensureTempDirectory()
+    local asset_cleanup
+    local assets_root
+
+    if show_images then
+        local story_link = resolveStoryLink(story)
+        if story_link then
+            html = rewriteRelativeResourceUrls(html, story_link)
+        end
+
+        local asset_paths = HtmlResources.prepareAssetPaths(temp_dir, string.format("preview_%d", os.time()))
+        if asset_paths then
+            local rewritten, assets = HtmlResources.downloadAndRewrite(html, story_link, asset_paths)
+            if rewritten and rewritten ~= "" then
+                html = rewritten
+            end
+            if assets and assets.assets_root then
+                assets_root = assets.assets_root
+                asset_cleanup = function()
+                    HtmlResources.cleanupAssets(assets_root)
+                    assets_root = nil
+                end
+            end
+        end
+    end
 
     local temp_file = writeHtmlToTempFile(html, base_title)
     if not temp_file then
+        if asset_cleanup then
+            asset_cleanup()
+        end
         self:_showFallback(story, on_action, on_close, options)
         return
     end
@@ -394,6 +580,9 @@ function StoryViewer:showStory(story, on_action, on_close, options)
             viewer_dialog = nil
         end
         UIManager:setDirty(nil, "full")
+        if asset_cleanup then
+            asset_cleanup()
+        end
         if on_close then
             on_close()
         end
@@ -411,8 +600,16 @@ function StoryViewer:showStory(story, on_action, on_close, options)
         zero_sep = true,
     }
 
-    local button_height = button_table:getSize().h
-    local html_height = height - Size.padding.large * 2 - button_height - Size.padding.default
+    local button_padding = Size.padding.default
+    local button_frame = FrameContainer:new{
+        background = Blitbuffer.COLOR_WHITE,
+        padding = button_padding,
+        bordersize = 0,
+        [1] = button_table,
+    }
+
+    local button_height = button_table:getSize().h + button_padding * 2
+    local html_height = height - Size.padding.large * 2 - button_height
     if html_height < Screen:scaleBySize(120) then
         html_height = Screen:scaleBySize(120)
     end
@@ -424,7 +621,7 @@ function StoryViewer:showStory(story, on_action, on_close, options)
         html_body = html,
         css = nil,
         is_xhtml = true,
-        html_resource_directory = ensureTempDirectory(),
+        html_resource_directory = temp_dir,
     }
 
     local html_container = FrameContainer:new{
@@ -444,8 +641,7 @@ function StoryViewer:showStory(story, on_action, on_close, options)
         },
     }
     table.insert(content_group, html_container)
-    table.insert(content_group, VerticalSpan:new{ width = Size.padding.default })
-    table.insert(content_group, button_table)
+    table.insert(content_group, button_frame)
 
     viewer_dialog = dialog:new{
         _is_story_viewer = true,

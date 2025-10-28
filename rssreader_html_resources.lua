@@ -5,6 +5,7 @@ local urlmod = require("socket.url")
 local util = require("util")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
+local DataStorage = require("datastorage")
 
 local HtmlResources = {}
 
@@ -26,6 +27,14 @@ local function ensureDirectory(path)
         return false
     end
     return true
+end
+
+function HtmlResources.ensureBaseDirectory()
+    local base_dir = DataStorage:getDataDir() .. "/cache/rssreader"
+    if ensureDirectory(base_dir) then
+        return base_dir
+    end
+    return nil
 end
 
 local function wipeDirectoryContents(path)
