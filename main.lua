@@ -347,6 +347,7 @@ function RSSReader:restoreLocalFeed(builder, account, feed_state)
 
     builder:showLocalFeed(feed, {
         account_name = account_name,
+        reuse = true,
     })
 end
 

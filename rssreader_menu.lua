@@ -1024,8 +1024,7 @@ function MenuBuilder:_updateStoryEntry(context, stories, index)
     if not entry then
         return
     end
-    local decorate = context.feed_type ~= "local"
-    entry.text = decoratedStoryTitle(story, decorate)
+    entry.text = decoratedStoryTitle(story, true)
     entry.bold = isUnread(story)
     if type(menu_instance.updateItems) == "function" then
         menu_instance:updateItems(nil, true)
@@ -1176,21 +1175,21 @@ function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
 
     if action == "mark_unread" then
         if story then
-            setStoryReadState(story, false)
             local remote_feed_id = resolveStoryFeedId(context, story)
-            if context and context.client and remote_feed_id and type(context.client.markStoryAsUnread) == "function" then
+            if context and context.feed_type ~= "local" and context.client and remote_feed_id and type(context.client.markStoryAsUnread) == "function" then
                 NetworkMgr:runWhenOnline(function()
                     local ok, err_or_data = context.client:markStoryAsUnread(remote_feed_id, story)
                     if ok then
+                        setStoryReadState(story, false)
                         self:_updateStoryEntry(context, stories, index)
                         self:_updateFeedCache(context)
                     else
-                        setStoryReadState(story, true)
-                        self:_updateStoryEntry(context, stories, index)
                         UIManager:show(InfoMessage:new{ text = err_or_data or _("Failed to update story state."), timeout = 3 })
                     end
                 end)
+                return
             end
+            setStoryReadState(story, false)
             if context and context.feed_type == "local" then
                 local feed_identifier = context.feed_identifier or (context.feed_node and (context.feed_node.url or context.feed_node.id))
                 if feed_identifier then
@@ -1204,6 +1203,9 @@ function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
                         end
                     end
                 end
+                self:_updateStoryEntry(context, stories, index)
+                self:_updateFeedCache(context)
+                return
             end
             self:_updateStoryEntry(context, stories, index)
             self:_updateFeedCache(context)
@@ -1883,6 +1885,7 @@ end
 
 function MenuBuilder:showLocalFeed(feed, opts)
     opts = opts or {}
+    local reuse_cached_stories = opts.reuse and true or false
     local account_name = opts.account_name or (feed and feed._rss_account_name) or "local"
     if feed then
         feed._rss_account_name = account_name
@@ -1984,9 +1987,10 @@ function MenuBuilder:showLocalFeed(feed, opts)
                 self:showLocalFeed(feed, {
                     account_name = account_name,
                     menu_page = feed_node._rss_menu_page,
+                    reuse = true,
                 })
             end,
-            force_refresh_on_close = true,
+            force_refresh_on_close = false,
         }
 
         local entries = {}
@@ -2049,6 +2053,17 @@ function MenuBuilder:showLocalFeed(feed, opts)
         end
 
         restoreMenuPage(menu_instance, feed_node, opts.menu_page or feed_node._rss_menu_page)
+
+        UIManager:setDirty(nil, "full")
+    end
+
+    local has_cached_stories = feed_node._rss_stories and #feed_node._rss_stories > 0
+
+    if reuse_cached_stories and has_cached_stories then
+        finalizeMenu()
+        if not opts.force_refresh then
+            return
+        end
     end
 
     NetworkMgr:runWhenOnline(function()
@@ -2318,7 +2333,8 @@ function MenuBuilder:showLocalGroup(group, account_name)
     end)
 end
 
-function MenuBuilder:showNewsBlurAccount(account)
+function MenuBuilder:showNewsBlurAccount(account, opts)
+    opts = opts or {}
     if not self.accounts or type(self.accounts.getNewsBlurClient) ~= "function" then
         UIManager:show(InfoMessage:new{
             text = _("NewsBlur integration is not available."),
@@ -2331,6 +2347,11 @@ function MenuBuilder:showNewsBlurAccount(account)
         UIManager:show(InfoMessage:new{
             text = err or _("Unable to open NewsBlur account."),
         })
+        return
+    end
+
+    if not opts.force_refresh and client.tree_cache then
+        self:showNewsBlurNode(account, client, client.tree_cache)
         return
     end
 
@@ -2407,6 +2428,7 @@ end
 
 function MenuBuilder:showNewsBlurFeed(account, client, feed_node, opts)
     opts = opts or {}
+    local reuse_cached_stories = opts.reuse and true or false
     feed_node._rss_stories = feed_node._rss_stories or {}
     feed_node._rss_story_keys = feed_node._rss_story_keys or {}
     feed_node._rss_page = feed_node._rss_page or 0
@@ -2432,12 +2454,9 @@ function MenuBuilder:showNewsBlurFeed(account, client, feed_node, opts)
         end
     end
 
-    local fetch_page
-    if opts.reuse then
-        fetch_page = nil
-    elseif opts.page then
-        fetch_page = opts.page
-    elseif feed_node._rss_page == 0 then
+    local fetch_page = opts.page
+    local has_cached_stories = feed_node._rss_stories and #feed_node._rss_stories > 0
+    if not fetch_page and (not reuse_cached_stories or not has_cached_stories) then
         fetch_page = 1
     end
 
@@ -2551,6 +2570,8 @@ function MenuBuilder:showNewsBlurFeed(account, client, feed_node, opts)
         end
 
         restoreMenuPage(menu_instance, feed_node, opts.menu_page or feed_node._rss_menu_page)
+
+        UIManager:setDirty(nil, "full")
     end
 
     if fetch_page then
@@ -2599,10 +2620,16 @@ function MenuBuilder:showNewsBlurFeed(account, client, feed_node, opts)
         return
     end
 
+    if reuse_cached_stories and feed_node._rss_stories and #feed_node._rss_stories > 0 then
+        finalizeMenu()
+        return
+    end
+
     finalizeMenu()
 end
 
-function MenuBuilder:showCommaFeedAccount(account)
+function MenuBuilder:showCommaFeedAccount(account, opts)
+    opts = opts or {}
     if not self.accounts or type(self.accounts.getCommaFeedClient) ~= "function" then
         UIManager:show(InfoMessage:new{
             text = _("CommaFeed integration is not available."),
@@ -2615,6 +2642,11 @@ function MenuBuilder:showCommaFeedAccount(account)
         UIManager:show(InfoMessage:new{
             text = err or _("Unable to open CommaFeed account."),
         })
+        return
+    end
+
+    if not opts.force_refresh and client.tree_cache then
+        self:showCommaFeedNode(account, client, client.tree_cache)
         return
     end
 
@@ -2693,6 +2725,7 @@ end
 
 function MenuBuilder:showCommaFeedFeed(account, client, feed_node, opts)
     opts = opts or {}
+    local reuse_cached_stories = opts.reuse and true or false
     feed_node._rss_stories = feed_node._rss_stories or {}
     feed_node._rss_story_keys = feed_node._rss_story_keys or {}
     feed_node._rss_page = feed_node._rss_page or 0
@@ -2718,11 +2751,9 @@ function MenuBuilder:showCommaFeedFeed(account, client, feed_node, opts)
     end
 
     local fetch_page
-    if opts.reuse then
-        fetch_page = nil
-    elseif opts.page then
+    if opts.page then
         fetch_page = opts.page
-    elseif feed_node._rss_page == 0 then
+    elseif not reuse_cached_stories then
         fetch_page = 1
     end
 
@@ -2834,6 +2865,8 @@ function MenuBuilder:showCommaFeedFeed(account, client, feed_node, opts)
         end
 
         restoreMenuPage(menu_instance, feed_node, opts.menu_page or feed_node._rss_menu_page)
+
+        UIManager:setDirty(nil, "full")
     end
 
     if fetch_page then

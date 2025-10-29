@@ -20,6 +20,7 @@ local lfs = require("libs/libkoreader-lfs")
 local _ = require("gettext")
 local HtmlResources = require("rssreader_html_resources")
 local urlmod = require("socket.url")
+local NetworkMgr = require("ui/network/manager")
 
 local Screen = Device.screen
 
@@ -519,6 +520,23 @@ function StoryViewer:showStory(story, on_action, on_close, options)
         preview_image_url = pickPreviewImage(story)
         if preview_image_url and htmlContainsImageSrc(html, preview_image_url) then
             preview_image_url = nil
+        end
+
+        local needs_network_for_images = preview_image_url ~= nil
+        if not needs_network_for_images and html then
+            local has_img_tag = html:match("<%s*[Ii][Mm][Gg][^>]-[Ss][Rr][Cc]%s*=%s*['\"]%s*[^'\"]")
+            local has_data_src = html:match("<%s*[Ii][Mm][Gg][^>]-[Dd][Aa][Tt][Aa]%s*-%s*[Ss][Rr][Cc]%s*=%s*['\"]%s*[^'\"]")
+            needs_network_for_images = has_img_tag ~= nil or has_data_src ~= nil
+        end
+
+        if needs_network_for_images and NetworkMgr:willRerunWhenOnline(function()
+            self:showStory(story, on_action, on_close, options)
+        end) then
+            UIManager:show(InfoMessage:new{
+                text = _("Connecting to download images..."),
+                timeout = 2,
+            })
+            return
         end
     end
 
