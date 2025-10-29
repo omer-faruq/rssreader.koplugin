@@ -20,6 +20,60 @@ local mimetype_to_extension = {
     ["image/bmp"] = "bmp",
 }
 
+local function matchAttribute(tag, attribute)
+    local pattern = attribute:gsub("%-", "%%-")
+    return tag:match(pattern .. '%s*=%s*"([^"]*)"')
+        or tag:match(pattern .. "%s*=%s*'([^']*)'")
+end
+
+local function parsePixelLength(value)
+    if type(value) ~= "string" or value == "" then
+        return nil
+    end
+    local trimmed = value:match("^%s*(.-)%s*$")
+    if not trimmed or trimmed == "" then
+        return nil
+    end
+    local number_part, unit_part = trimmed:match("^([%d%.]+)%s*([%a%%]*)$")
+    if not number_part then
+        return nil
+    end
+    if unit_part and unit_part ~= "" then
+        unit_part = unit_part:lower()
+        if unit_part ~= "px" then
+            return nil
+        end
+    end
+    return tonumber(number_part)
+end
+
+local function parseStylePixelLength(style, property)
+    if type(style) ~= "string" or style == "" then
+        return nil
+    end
+    local lowered = style:lower()
+    local value = lowered:match(property .. "%s*:%s*([^;]+)")
+    if value then
+        return parsePixelLength(value)
+    end
+    return nil
+end
+
+local function isTinyPixelImage(tag)
+    local width_attr = matchAttribute(tag, "width")
+    local height_attr = matchAttribute(tag, "height")
+    local style_attr = matchAttribute(tag, "style")
+
+    local width = parsePixelLength(width_attr) or parseStylePixelLength(style_attr, "width")
+    local height = parsePixelLength(height_attr) or parseStylePixelLength(style_attr, "height")
+
+    if width and width <= 1 and height and height <= 1 then
+        return true
+    end
+
+    return false
+end
+
 local function ensureDirectory(path)
     local ok, err = util.makePath(path)
     if not ok then
@@ -182,6 +236,10 @@ function HtmlResources.downloadAndRewrite(html, page_url, asset_paths)
     local imagenum = 1
 
     local function processTag(img_tag)
+        if isTinyPixelImage(img_tag) then
+            return ""
+        end
+
         local original_src
         local original_attribute
 
