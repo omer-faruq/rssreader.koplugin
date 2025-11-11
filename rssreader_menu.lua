@@ -2934,39 +2934,32 @@ function MenuBuilder:showCommaFeedFeed(account, client, feed_node, opts)
 
     finalizeMenu()
 end
-function MenuBuilder:showFreshRSSAccount(account, opts)
-    opts = opts or {}
-    if not self.accounts or type(self.accounts.getFreshRSSClient) ~= "function" then
-        UIManager:show(InfoMessage:new{
-            text = _("FreshRSS integration is not available."),
-        })
-        return
-    end
-
-    local client, err = self.accounts:getFreshRSSClient(account)
-    if not client then
-        UIManager:show(InfoMessage:new{
-            text = err or _("Unable to open FreshRSS account."),
-        })
-        return
-    end
-
-    if not opts.force_refresh and client.tree_cache then
-        self:showFreshRSSNode(account, client, client.tree_cache)
-        return
-    end
-
-    NetworkMgr:runWhenOnline(function()
-        local ok, tree_or_err = client:buildTree()
-        if not ok then
-            UIManager:show(InfoMessage:new{
-                text = tree_or_err or _("Failed to load FreshRSS subscriptions."),
-            })
-            return
-        end
-
-        self:showFreshRSSNode(account, client, tree_or_err)
-    end)
+function MenuBuilder:showFreshRSSAccount(account, opts)  
+    opts = opts or {}  
+    if not self.accounts or type(self.accounts.getFreshRSSClient) ~= "function" then  
+        UIManager:show(InfoMessage:new{  
+            text = _("FreshRSS integration is not available."),  
+        })  
+        return  
+    end  
+  
+    local client, err = self.accounts:getFreshRSSClient(account)  
+    if not client then  
+        UIManager:show(InfoMessage:new{  
+            text = err or _("Unable to open FreshRSS account."),  
+        })  
+        return  
+    end  
+  
+    -- NEW: Skip tree loading, go directly to Today view  
+    local today_feed_node = {  
+        id = "freshrss_today_unread",  
+        title = _("Today (Unread)"),  
+        api_feed_id = "user/-/state/com.google/reading-list",  
+        is_special_feed = true,  
+        feed = { unreadCount = 0 }  
+    }  
+    self:showFreshRSSFeed(account, client, today_feed_node)  
 end
 
 function MenuBuilder:showFreshRSSNode(account, client, node)
@@ -3063,12 +3056,13 @@ function MenuBuilder:showFreshRSSFeed(account, client, feed_node, opts)
     local api_fetch_id = feed_node.api_feed_id or feed_node.id
     local fetch_options = {}
  
-    if is_special_feed and feed_node.id == "freshrss_today_unread" then  
-        fetch_options.published_since = getStartOfTodayTimestamp() * 1000000  -- Convert to microseconds  
+    if is_special_feed and feed_node.id == "freshrss_today_unread" then    
+        fetch_options.published_since = getStartOfTodayTimestamp() * 1000000  
         fetch_options.read_filter = "unread_only"  
-        if not opts.page then  
-            opts.page = 1   
-        end  
+        fetch_options.n = 20  -- Limit to 20 items for Today view  
+        if not opts.page then    
+            opts.page = 1     
+        end    
     end
 
     if self.reader and type(self.reader.getFeedState) == "function" then

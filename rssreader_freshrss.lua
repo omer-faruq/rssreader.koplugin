@@ -310,8 +310,14 @@ function FreshRSS:buildTreeFromData(subs_data, tags_data)
     }
 end
 
-function FreshRSS:buildTree(force)
-    return self:fetchStructure(force)
+function FreshRSS:buildTree(force)  
+    -- Return minimal tree for Today-only mode  
+    return true, {  
+        kind = "root",  
+        title = (self.account and self.account.name) or "FreshRSS",  
+        children = {},  
+        feeds = {},  
+    }  
 end
 
 local function normalizeEntry(entry)
@@ -354,7 +360,7 @@ function FreshRSS:fetchStories(feed_id, options)
 
     local query = {
         output = "json",
-        n = 50, -- Number of items to fetch
+        n = 20, -- Number of items to fetch
     }
     if options.continuation then
         query.c = options.continuation
