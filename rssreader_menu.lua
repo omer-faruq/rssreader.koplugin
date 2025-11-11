@@ -3082,7 +3082,7 @@ function MenuBuilder:showFreshRSSFeed(account, client, feed_node, opts)
     if is_special_feed then  
         -- Apply unread filter for all special feeds  
         fetch_options.read_filter = "unread_only"  
-        fetch_options.n = 5
+        fetch_options.n = 15
         
         -- Only apply time filter for the "Today" feed  
         if feed_node.id == "freshrss_today_unread" then  
