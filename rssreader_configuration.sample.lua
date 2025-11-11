@@ -19,15 +19,22 @@ return {
                 password = "password",
             },
         },
-        {
-            name = "My FreshRSS", -- You can set a custom name
-            type = "freshrss",
-            active = true, -- Set to true to enable this account
-            auth = {
-                base_url = "https://your-freshrss-domain.com", -- Your server URL
-                username = "your_freshrss_username",
-                password = "your_api_password", -- Get this from FreshRSS > Profile > API Password
-            },
+        {  
+            name = "My FreshRSS",  
+            type = "freshrss",  
+            active = true,  
+            auth = {  
+                base_url = "https://your-freshrss-domain.com",  
+                username = "your_freshrss_username",  
+                password = "your_api_password",  
+            },  
+            special_feeds = {
+                {  
+                    id = "feed/305",  
+                    title = "read-it-later",
+                },  
+                -- Add more feeds as needed  
+            },  
         },
         {
             name = "Sample", -- you can set a custom name but also rename in rssreader_local_defaults.lua

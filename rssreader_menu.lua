@@ -2951,23 +2951,44 @@ function MenuBuilder:showFreshRSSAccount(account, opts)
         return      
     end      
       
-    -- Build a tree with the Today feed as a child node  
-    local today_feed_node = {  
-        kind = "feed",  -- IMPORTANT: Change from no kind to "feed"  
+    -- Build feed nodes dynamically from configuration  
+    local children = {}
+    -- Always Build a tree with the Today feed as a child node  
+    table.insert(children, {  
+        kind = "feed",  
         id = "freshrss_today_unread",  
         title = _("Today (Unread)"),  
         api_feed_id = "user/-/state/com.google/reading-list",  
         is_special_feed = true,  
         feed = { unreadCount = 0 }  
+    })  
+      
+    -- Add configured special feeds  
+    if account.special_feeds and type(account.special_feeds) == "table" then  
+        for _, special_feed in ipairs(account.special_feeds) do  
+            if special_feed.id then  
+                -- Convert feed ID to internal ID (replace "/" with "_")  
+                local internal_id = "freshrss_" .. special_feed.id:gsub("/", "_") .. "_unread"  
+                  
+                table.insert(children, {  
+                    kind = "feed",  
+                    id = internal_id,  
+                    title = special_feed.title or special_feed.id,  
+                    api_feed_id = special_feed.id,  
+                    is_special_feed = true,  
+                    feed = { unreadCount = 0 }  
+                })  
+            end  
+        end  
+    end  
+      
+    local tree = {  
+        kind = "root",  
+        title = account.name or "FreshRSS",  
+        children = children  
     }  
       
-    local tree = {    
-        kind = "root",    
-        title = account.name or "FreshRSS",    
-        children = { today_feed_node }  -- Add the feed node here  
-    }    
-        
-    self:showFreshRSSNode(account, client, tree)    
+    self:showFreshRSSNode(account, client, tree)  
 end
 
 function MenuBuilder:showFreshRSSNode(account, client, node)
@@ -3045,13 +3066,19 @@ function MenuBuilder:showFreshRSSFeed(account, client, feed_node, opts)
     local api_fetch_id = feed_node.api_feed_id or feed_node.id
     local fetch_options = {}
  
-    if is_special_feed and feed_node.id == "freshrss_today_unread" then    
-        fetch_options.published_since = getStartOfTodayTimestamp() * 1000000  
+    if is_special_feed then  
+        -- Apply unread filter for all special feeds  
         fetch_options.read_filter = "unread_only"  
-        fetch_options.n = 30
-        if not opts.page then    
-            opts.page = 1     
-        end    
+        fetch_options.n = 5
+        
+        -- Only apply time filter for the "Today" feed  
+        if feed_node.id == "freshrss_today_unread" then  
+            fetch_options.published_since = getStartOfTodayTimestamp() * 1000000  
+        end  
+        
+        if not opts.page then  
+            opts.page = 1  
+        end  
     end
 
     if self.reader and type(self.reader.getFeedState) == "function" then
