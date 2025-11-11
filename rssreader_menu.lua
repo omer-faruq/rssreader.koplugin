@@ -2972,7 +2972,7 @@ function MenuBuilder:showFreshRSSAccount(account, opts)
         id = "freshrss_all",  
         title = _("All Unread"),
         api_feed_id = "user/-/state/com.google/reading-list",  
-        is_special_feed = false,
+        is_special_feed = true,
         feed = { unreadCount = 0 }  
     })  
       
