@@ -240,7 +240,7 @@ local function decoratedStoryTitle(story, decorate)
     end
 
     if story.feed_title and story.feed_title ~= "" then  
-        title = story.feed_title .. " • " .. title
+        title = "[" .. story.feed_title .. "]" .. " • " .. title
     end  
 
     local date_label = formatStoryDate(story)
@@ -2965,6 +2965,14 @@ function MenuBuilder:showFreshRSSAccount(account, opts)
         title = _("Today (Unread)"),  
         api_feed_id = "user/-/state/com.google/reading-list",  
         is_special_feed = true,  
+        feed = { unreadCount = 0 }  
+    })  
+    table.insert(children, {  
+        kind = "feed",  
+        id = "freshrss_all",  
+        title = _("All Unread"),
+        api_feed_id = "user/-/state/com.google/reading-list",  
+        is_special_feed = false,
         feed = { unreadCount = 0 }  
     })  
       
