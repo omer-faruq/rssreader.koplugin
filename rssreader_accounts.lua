@@ -22,6 +22,7 @@ function Accounts:new()
         local_store = local_store,
         newsblur_clients = {},
         commafeed_clients = {},
+        freshrss_clients = {},
     }
     setmetatable(instance, self)
     return instance
@@ -73,6 +74,23 @@ function Accounts:getCommaFeedClient(account)
     local CommaFeed = require("rssreader_commafeed")
     local client = CommaFeed:new(account)
     self.commafeed_clients[account.name] = client
+    return client
+end
+
+function Accounts:getFreshRSSClient(account)
+    if not account or account.type ~= "freshrss" then
+        return nil, "Account is not a FreshRSS account"
+    end
+    if not account.name then
+        return nil, "FreshRSS account is missing a name"
+    end
+    if self.freshrss_clients[account.name] then
+        return self.freshrss_clients[account.name]
+    end
+
+    local FreshRSS = require("rssreader_freshrss")
+    local client = FreshRSS:new(account)
+    self.freshrss_clients[account.name] = client
     return client
 end
 

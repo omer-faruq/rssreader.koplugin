@@ -20,6 +20,16 @@ return {
             },
         },
         {
+            name = "My FreshRSS", -- You can set a custom name
+            type = "freshrss",
+            active = true, -- Set to true to enable this account
+            auth = {
+                base_url = "https://your-freshrss-domain.com", -- Your server URL
+                username = "your_freshrss_username",
+                password = "your_api_password", -- Get this from FreshRSS > Profile > API Password
+            },
+        },
+        {
             name = "Sample", -- you can set a custom name but also rename in rssreader_local_defaults.lua
             type = "local",
             active = true, -- set to true to enable this account
@@ -31,13 +41,19 @@ return {
         },
     },
     sanitizers = { -- available types = fivefilters, diffbot
+        {  
+            order = 1,  
+            type = "fivefilters",  
+            active = false,  
+            base_url = "https://rss.com",  -- your self host ftr instance
+        }, 
+        {  
+            order = 2,  
+            type = "fivefilters",  
+            active = false,  
+        }, 
         {
-            order = 1,
-            type = "fivefilters",
-            active = true,
-        },
-        {
-            order = 2,
+            order = 3,
             type = "diffbot",
             active = false,
             token = "your_diffbot_token", -- get your token here: https://app.diffbot.com/
