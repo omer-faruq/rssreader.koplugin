@@ -3059,7 +3059,7 @@ function MenuBuilder:showFreshRSSFeed(account, client, feed_node, opts)
     if is_special_feed and feed_node.id == "freshrss_today_unread" then    
         fetch_options.published_since = getStartOfTodayTimestamp() * 1000000  
         fetch_options.read_filter = "unread_only"  
-        fetch_options.n = 20  -- Limit to 20 items for Today view  
+        fetch_options.n = 30
         if not opts.page then    
             opts.page = 1     
         end    
@@ -3102,7 +3102,7 @@ function MenuBuilder:showFreshRSSFeed(account, client, feed_node, opts)
         end
 
         local context = {
-            feed_type = "FreshRSS",
+            feed_type = "freshrss",
             account = account,
             client = client,
             feed_node = feed_node,
@@ -3120,7 +3120,7 @@ function MenuBuilder:showFreshRSSFeed(account, client, feed_node, opts)
             local function openStory()
                 self:showStory(stories, index, function(action, payload)
                     self:handleStoryAction(stories, index, action, payload, context)
-                end, nil, { disable_story_mutators = true }, context)
+                end, nil, nil, context)
             end
             table.insert(entries, {
                 text = decoratedStoryTitle(story, true),
