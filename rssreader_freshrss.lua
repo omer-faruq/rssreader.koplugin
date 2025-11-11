@@ -360,7 +360,7 @@ function FreshRSS:fetchStories(feed_id, options)
 
     local query = {
         output = "json",
-        n = 20, -- Number of items to fetch
+        n = 10, -- Number of items to fetch
     }
     if options.continuation then
         query.c = options.continuation

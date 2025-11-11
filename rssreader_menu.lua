@@ -2934,56 +2934,45 @@ function MenuBuilder:showCommaFeedFeed(account, client, feed_node, opts)
 
     finalizeMenu()
 end
-function MenuBuilder:showFreshRSSAccount(account, opts)  
-    opts = opts or {}  
-    if not self.accounts or type(self.accounts.getFreshRSSClient) ~= "function" then  
-        UIManager:show(InfoMessage:new{  
-            text = _("FreshRSS integration is not available."),  
-        })  
-        return  
-    end  
-  
-    local client, err = self.accounts:getFreshRSSClient(account)  
-    if not client then  
-        UIManager:show(InfoMessage:new{  
-            text = err or _("Unable to open FreshRSS account."),  
-        })  
-        return  
-    end  
-  
-    -- NEW: Skip tree loading, go directly to Today view  
+function MenuBuilder:showFreshRSSAccount(account, opts)      
+    opts = opts or {}      
+    if not self.accounts or type(self.accounts.getFreshRSSClient) ~= "function" then      
+        UIManager:show(InfoMessage:new{      
+            text = _("FreshRSS integration is not available."),      
+        })      
+        return      
+    end      
+      
+    local client, err = self.accounts:getFreshRSSClient(account)      
+    if not client then      
+        UIManager:show(InfoMessage:new{      
+            text = err or _("Unable to open FreshRSS account."),      
+        })      
+        return      
+    end      
+      
+    -- Build a tree with the Today feed as a child node  
     local today_feed_node = {  
+        kind = "feed",  -- IMPORTANT: Change from no kind to "feed"  
         id = "freshrss_today_unread",  
         title = _("Today (Unread)"),  
         api_feed_id = "user/-/state/com.google/reading-list",  
         is_special_feed = true,  
         feed = { unreadCount = 0 }  
     }  
-    self:showFreshRSSFeed(account, client, today_feed_node)  
+      
+    local tree = {    
+        kind = "root",    
+        title = account.name or "FreshRSS",    
+        children = { today_feed_node }  -- Add the feed node here  
+    }    
+        
+    self:showFreshRSSNode(account, client, tree)    
 end
 
 function MenuBuilder:showFreshRSSNode(account, client, node)
     local children = node and node.children or {}
     local entries = {}
-    if node.kind == "root" then
-            table.insert(entries, {
-                text = _("Today (Unread)"),
-                callback = function()
-                    -- This is a "mock" feed node.
-                    -- We give it a unique ID for caching, but
-                    -- tell it to fetch "all items" from the API.
-                    local today_feed_node = {
-                        id = "freshrss_today_unread", -- Special ID for caching
-                        title = _("Today (Unread)"),
-                        -- GReader API ID for "all items"
-                        api_feed_id = "user/-/state/com.google/reading-list", 
-                        is_special_feed = true, -- Flag for the next function
-                        feed = { unreadCount = 0 } -- Mock feed data
-                    }
-                    self:showFreshRSSFeed(account, client, today_feed_node)
-                end,
-            })
-        end
     for _, child in ipairs(children) do
         if child.kind == "folder" then
             local normal_callback = function()
