@@ -333,10 +333,16 @@ local function normalizeEntry(entry)
     local content = (entry.content and entry.content.content) or (entry.summary and entry.summary.content) or ""
     local permalink = (entry.alternate and entry.alternate[1] and entry.alternate[1].href) or entry.id
 
+    local feed_title = nil  
+    if entry.origin and entry.origin.title then  
+        feed_title = entry.origin.title  
+    end  
+
     return {
         id = entry.id,
         story_id = entry.id,
         feed_id = entry.origin and entry.origin.streamId,
+        feed_title = feed_title,
         title = entry.title or "Untitled",
         story_title = entry.title or "Untitled",
         permalink = permalink,

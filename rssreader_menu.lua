@@ -238,6 +238,11 @@ local function decoratedStoryTitle(story, decorate)
     if decorate and isUnread(story) then
         title = string.format("%s • %s", _("NEW"), title)
     end
+
+    if story.feed_title and story.feed_title ~= "" then  
+        title = story.feed_title .. " • " .. title
+    end  
+
     local date_label = formatStoryDate(story)
     if date_label then
         return string.format("%s %s %s", title, " • ", date_label)
