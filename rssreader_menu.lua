@@ -30,6 +30,20 @@ local HtmlResources = require("rssreader_html_resources")
 local FiveFiltersSanitizer = require("sanitizers/rssreader_sanitizer_fivefilters")
 local DiffbotSanitizer = require("sanitizers/rssreader_sanitizer_diffbot")
 
+local function getStartOfTodayTimestamp()
+    local now_t = os.date("*t")
+    local start_of_day_t = {
+        year = now_t.year,
+        month = now_t.month,
+        day = now_t.day,
+        hour = 0,
+        min = 0,
+        sec = 0,
+        isdst = now_t.isdst -- Respect local timezone
+    }
+    return os.time(start_of_day_t)
+end
+
 local function loadEpubDownloadBackend()
     local candidates = {
         "rssreader_epubdownloadbackend",
@@ -224,6 +238,11 @@ local function decoratedStoryTitle(story, decorate)
     if decorate and isUnread(story) then
         title = string.format("%s • %s", _("NEW"), title)
     end
+
+    if story.feed_title and story.feed_title ~= "" then  
+        title = "[" .. story.feed_title .. "]" .. " • " .. title
+    end  
+
     local date_label = formatStoryDate(story)
     if date_label then
         return string.format("%s %s %s", title, " • ", date_label)
@@ -2226,6 +2245,9 @@ function MenuBuilder:openAccount(reader, account)
     elseif account_type == "commafeed" then
         self:showCommaFeedAccount(account)
         return
+    elseif account_type == "freshrss" then
+        self:showFreshRSSAccount(account)
+        return
     end
 
     UIManager:show(InfoMessage:new{
@@ -2872,6 +2894,355 @@ function MenuBuilder:showCommaFeedFeed(account, client, feed_node, opts)
     if fetch_page then
         NetworkMgr:runWhenOnline(function()
             local ok, data_or_err = client:fetchStories(feed_node.id, { page = fetch_page })
+            if not ok then
+                UIManager:show(InfoMessage:new{
+                    text = data_or_err or _("Failed to load stories."),
+                })
+                return
+            end
+            local batch = (data_or_err and data_or_err.stories) or {}
+            if fetch_page == 1 then
+                feed_node._rss_stories = {}
+                feed_node._rss_story_keys = {}
+            end
+            if #batch == 0 then
+                if fetch_page == 1 and #feed_node._rss_stories == 0 then
+                    UIManager:show(InfoMessage:new{
+                        text = _("No stories available."),
+                    })
+                    feed_node._rss_has_more = false
+                    return
+                end
+                feed_node._rss_has_more = false
+                if fetch_page > 1 then
+                    UIManager:show(InfoMessage:new{
+                        text = _("No more stories available."),
+                    })
+                end
+            else
+                feed_node._rss_page = fetch_page
+                for _, story in ipairs(batch) do
+                    appendUniqueStory(feed_node._rss_stories, feed_node._rss_story_keys, story)
+                end
+                local more = false
+                if data_or_err and data_or_err.more_stories ~= nil then
+                    more = data_or_err.more_stories and true or false
+                else
+                    more = #batch > 0
+                end
+                feed_node._rss_has_more = more
+            end
+            finalizeMenu()
+        end)
+        return
+    end
+
+    finalizeMenu()
+end
+function MenuBuilder:showFreshRSSAccount(account, opts)      
+    opts = opts or {}      
+    if not self.accounts or type(self.accounts.getFreshRSSClient) ~= "function" then      
+        UIManager:show(InfoMessage:new{      
+            text = _("FreshRSS integration is not available."),      
+        })      
+        return      
+    end      
+      
+    local client, err = self.accounts:getFreshRSSClient(account)      
+    if not client then      
+        UIManager:show(InfoMessage:new{      
+            text = err or _("Unable to open FreshRSS account."),      
+        })      
+        return      
+    end      
+      
+    -- Build feed nodes dynamically from configuration  
+    local children = {}
+    -- Always Build a tree with the Today feed as a child node  
+    table.insert(children, {  
+        kind = "feed",  
+        id = "freshrss_today_unread",  
+        title = _("Today (Unread)"),  
+        api_feed_id = "user/-/state/com.google/reading-list",  
+        is_special_feed = true,  
+        feed = { unreadCount = 0 }  
+    })  
+    table.insert(children, {  
+        kind = "feed",  
+        id = "freshrss_all",  
+        title = _("All Unread"),
+        api_feed_id = "user/-/state/com.google/reading-list",  
+        is_special_feed = true,
+        feed = { unreadCount = 0 }  
+    })  
+      
+    -- Add configured special feeds  
+    if account.special_feeds and type(account.special_feeds) == "table" then  
+        for _, special_feed in ipairs(account.special_feeds) do  
+            if special_feed.id then  
+                -- Convert feed ID to internal ID (replace "/" with "_")  
+                local internal_id = "freshrss_" .. special_feed.id:gsub("/", "_") .. "_unread"  
+                  
+                table.insert(children, {  
+                    kind = "feed",  
+                    id = internal_id,  
+                    title = special_feed.title or special_feed.id,  
+                    api_feed_id = special_feed.id,  
+                    is_special_feed = true,  
+                    feed = { unreadCount = 0 }  
+                })  
+            end  
+        end  
+    end  
+      
+    local tree = {  
+        kind = "root",  
+        title = account.name or "FreshRSS",  
+        children = children  
+    }  
+      
+    self:showFreshRSSNode(account, client, tree)  
+end
+
+function MenuBuilder:showFreshRSSNode(account, client, node)
+    local children = node and node.children or {}
+    local entries = {}
+    for _, child in ipairs(children) do
+        if child.kind == "folder" then
+            local normal_callback = function()
+                self:showFreshRSSNode(account, client, child)
+            end
+            table.insert(entries, {
+                text = child.title or _("Untitled folder"),
+                callback = normal_callback,
+            })
+        elseif child.kind == "feed" then
+            local normal_callback = function()
+                self:showFreshRSSFeed(account, client, child)
+            end
+            local unread_count = child.feed.unreadCount or 0
+            local display_title = child.title or _("Untitled feed")
+            if unread_count > 0 then
+                display_title = display_title .. " (" .. tostring(unread_count) .. ")"
+            end
+            table.insert(entries, {
+                text = display_title,
+                callback = normal_callback,
+                hold_callback = function()
+                    self:createLongPressMenuForNode(account, client, child, normal_callback)
+                end,
+                hold_keep_menu_open = true,
+            })
+        end
+    end
+
+    local function menu_hold_handler(_, item)
+        if item and type(item.hold_callback) == "function" then
+            item.hold_callback()
+        end
+        return true
+    end
+
+    if #entries == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("No feeds available."),
+        })
+        return
+    end
+
+    local menu_instance = Menu:new{
+        title = node and node.title or (account and account.name) or _("FreshRSS"),
+        item_table = entries,
+        onMenuHold = triggerHoldCallback,
+    }
+    self:showMenu(menu_instance, function()
+        self:showFreshRSSNode(account, client, node)
+    end)
+
+    if menu_instance then
+        menu_instance.onMenuHold = triggerHoldCallback
+    end
+end
+
+function MenuBuilder:showFreshRSSFeed(account, client, feed_node, opts)
+    opts = opts or {}
+    local reuse_cached_stories = opts.reuse and true or false
+    feed_node._rss_stories = feed_node._rss_stories or {}
+    feed_node._rss_story_keys = feed_node._rss_story_keys or {}
+    feed_node._rss_page = feed_node._rss_page or 0
+    feed_node._account_name = account.name
+    feed_node._rss_reader = self.reader
+
+    -- Check if this is our special "Today" feed
+    local is_special_feed = feed_node.is_special_feed and true or false
+    -- Use the real API feed ID if provided, otherwise default to the node's ID
+    local api_fetch_id = feed_node.api_feed_id or feed_node.id
+    local fetch_options = {}
+ 
+    if is_special_feed then  
+        -- Apply unread filter for all special feeds  
+        fetch_options.read_filter = "unread_only"  
+        fetch_options.n = 15
+        
+        -- Only apply time filter for the "Today" feed  
+        if feed_node.id == "freshrss_today_unread" then  
+            fetch_options.published_since = getStartOfTodayTimestamp() * 1000000  
+        end  
+        
+        if not opts.page then  
+            opts.page = 1  
+        end  
+    end
+
+    if self.reader and type(self.reader.getFeedState) == "function" then
+        local stored_state = self.reader:getFeedState(account.name, feed_node.id)
+        if stored_state then
+            if type(stored_state.stories) == "table" and #stored_state.stories > 0 then
+                feed_node._rss_stories = util.tableDeepCopy(stored_state.stories)
+                feed_node._rss_story_keys = util.tableDeepCopy(stored_state.story_keys or {})
+                feed_node._rss_page = stored_state.current_page or feed_node._rss_page
+                feed_node._rss_has_more = stored_state.has_more or feed_node._rss_has_more
+            end
+            if type(stored_state.menu_page) == "number" then
+                feed_node._rss_menu_page = feed_node._rss_menu_page or stored_state.menu_page
+                if not opts.menu_page then
+                    opts.menu_page = stored_state.menu_page
+                end
+            end
+        end
+    end
+
+    local fetch_page
+    if opts.page then
+        fetch_page = opts.page
+        -- Make sure our options table includes the page
+        fetch_options.page = opts.page 
+    elseif not reuse_cached_stories then
+        fetch_page = 1
+    end
+
+    local function finalizeMenu()
+        local stories = feed_node._rss_stories or {}
+        if #stories == 0 then
+            UIManager:show(InfoMessage:new{
+                text = _("No stories available."),
+            })
+            return
+        end
+
+        local context = {
+            feed_type = "freshrss",
+            account = account,
+            client = client,
+            feed_node = feed_node,
+            -- Use the API feed ID for context actions like "mark as read"
+            feed_id = api_fetch_id, 
+            refresh = function()
+                self:showFreshRSSFeed(account, client, feed_node, { reuse = true })
+            end,
+            force_refresh_on_close = false,
+        }
+
+        local entries = {}
+        for index, story in ipairs(stories) do
+            normalizeStoryLink(story)
+            local function openStory()
+                self:showStory(stories, index, function(action, payload)
+                    self:handleStoryAction(stories, index, action, payload, context)
+                end, nil, nil, context)
+            end
+            table.insert(entries, {
+                text = decoratedStoryTitle(story, true),
+                bold = isUnread(story),
+                callback = openStory,
+                hold_callback = function()
+                    self:createStoryLongPressMenu(stories, index, context, openStory)
+                end,
+                hold_keep_menu_open = true,
+            })
+        end
+
+        local current_menu = self.reader and self.reader.current_menu_info and self.reader.current_menu_info.menu
+        local menu_instance
+        if current_menu and current_menu._rss_feed_node == feed_node then
+            menu_instance = current_menu
+            if menu_instance.setTitle then
+                menu_instance:setTitle(feed_node.title or (account and account.name) or _("FreshRSS"))
+            end
+            if menu_instance.switchItemTable then
+                menu_instance:switchItemTable(nil, entries)
+            end
+            menu_instance.onMenuHold = triggerHoldCallback
+        else
+            menu_instance = Menu:new{
+                title = feed_node.title or (account and account.name) or _("FreshRSS"),
+                item_table = entries,
+                multilines_forced = true,
+            }
+            menu_instance._rss_feed_node = feed_node
+            menu_instance.onMenuHold = triggerHoldCallback
+            ensureMenuCloseHook(menu_instance)
+            trackMenuPage(menu_instance, feed_node)
+            self:showMenu(menu_instance, function()
+                self:showFreshRSSFeed(account, client, feed_node, { reuse = true })
+            end)
+        end
+
+        if menu_instance then
+            context.menu_instance = menu_instance
+            menu_instance._rss_feed_node = feed_node
+            menu_instance.onMenuHold = triggerHoldCallback
+            ensureMenuCloseHook(menu_instance)
+            trackMenuPage(menu_instance, feed_node)
+        end
+
+        if menu_instance and menu_instance.page_info then
+            local next_page = (feed_node._rss_page or 1) + 1
+            local existing_button_index
+            for idx = #menu_instance.page_info, 1, -1 do
+                local widget = menu_instance.page_info[idx]
+                if widget and widget._rss_is_more_button then
+                    existing_button_index = idx
+                    break
+                end
+            end
+            if existing_button_index then
+                table.remove(menu_instance.page_info, existing_button_index)
+                table.remove(menu_instance.page_info, existing_button_index - 1)
+            end
+            if feed_node._rss_has_more then
+                local spacer = HorizontalSpan:new{ width = Screen:scaleBySize(16) }
+                local load_more_button = Button:new{
+                    text = _("More"),
+                    bordersize = 0,
+                    show_parent = menu_instance.show_parent or menu_instance,
+                    callback = function()
+                        self:showFreshRSSFeed(account, client, feed_node, { page = next_page })
+                    end,
+                }
+                load_more_button._rss_is_more_button = true
+                table.insert(menu_instance.page_info, spacer)
+                table.insert(menu_instance.page_info, load_more_button)
+            end
+            if menu_instance.page_info.resetLayout then
+                menu_instance.page_info:resetLayout()
+            end
+        end
+
+        restoreMenuPage(menu_instance, feed_node, opts.menu_page or feed_node._rss_menu_page)
+
+        UIManager:setDirty(nil, "full")
+    end
+
+    if fetch_page then
+        NetworkMgr:runWhenOnline(function()
+            -- Pass the full fetch_options table
+            if not fetch_options.page then
+                fetch_options.page = fetch_page
+            end
+            -- Make sure to use api_fetch_id and pass fetch_options
+            local ok, data_or_err = client:fetchStories(api_fetch_id, fetch_options)
+            
             if not ok then
                 UIManager:show(InfoMessage:new{
                     text = data_or_err or _("Failed to load stories."),

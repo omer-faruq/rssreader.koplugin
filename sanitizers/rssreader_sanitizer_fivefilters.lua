@@ -27,20 +27,27 @@ function FiveFiltersSanitizer.hasLikelyXmlStructure(content)
     return false
 end
 
-function FiveFiltersSanitizer.buildUrl(link)
-    if type(link) ~= "string" or link == "" then
-        return nil
-    end
-
-    local encoded = util.urlEncode(link)
-    if not encoded or encoded == "" then
-        return nil
-    end
-
-    return string.format(
-        "https://ftr.fivefilters.net/makefulltextfeed.php?step=3&fulltext=1&url=%s&max=3&links=preserve&exc=1&submit=Create+Feed",
-        encoded
-    )
+function FiveFiltersSanitizer.buildUrl(link, sanitizer)  
+    if type(link) ~= "string" or link == "" then  
+        return nil  
+    end  
+  
+    local encoded = util.urlEncode(link)  
+    if not encoded or encoded == "" then  
+        return nil  
+    end  
+  
+    -- Use custom base_url if provided, otherwise use default  
+    local base_url = "https://ftr.fivefilters.net"  
+    if type(sanitizer) == "table" and type(sanitizer.base_url) == "string" and sanitizer.base_url ~= "" then  
+        base_url = sanitizer.base_url:gsub("/+$", "")  -- Remove trailing slashes  
+    end  
+  
+    return string.format(  
+        "%s/makefulltextfeed.php?step=3&fulltext=1&url=%s&max=3&links=preserve&exc=1&submit=Create+Feed",  
+        base_url,  
+        encoded  
+    )  
 end
 
 function FiveFiltersSanitizer.detectBlocked(content)
