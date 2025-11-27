@@ -67,7 +67,7 @@ return {
         },
     },
     features = {
-        default_folder_on_save = nil, -- set a folder to save new feeds to, if nil then default is home folder
+        default_folder_on_save = nil, -- set a folder to save new feeds to, if nil then default is home folder (example for kindle:"/mnt/us/documents/rss", for kobo: "/mnt/onboard/rss") 
         download_images_when_sanitize_successful = true, -- if sanitize functionality is successful, download images
         download_images_when_sanitize_unsuccessful = false, -- if sanitize functionality is unsuccessful, download images (for the original html file)
         show_images_in_preview = true, -- show images in preview screen
