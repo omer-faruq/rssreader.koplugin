@@ -22,7 +22,7 @@ return {
         {  
             name = "My FreshRSS",  
             type = "freshrss",  
-            active = true,  
+            active = false,  
             auth = {  
                 base_url = "https://your-freshrss-domain.com",  
                 username = "your_freshrss_username",  
@@ -57,7 +57,7 @@ return {
         {  
             order = 2,  
             type = "fivefilters",  
-            active = false,  
+            active = true,  
         }, 
         {
             order = 3,
