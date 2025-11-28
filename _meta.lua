@@ -4,5 +4,5 @@ return {
     name = "rssreader",
     fullname = _("RSS Reader"),
     description = _([[Read RSS feeds from local lists or online services.]]),
-    version = "1.0.0",
+    version = "1.1.0",
 }
