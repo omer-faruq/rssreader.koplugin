@@ -2851,6 +2851,7 @@ function MenuBuilder:showCommaFeedFeed(account, client, feed_node, opts)
             menu_instance.onMenuHold = triggerHoldCallback
             ensureMenuCloseHook(menu_instance)
             trackMenuPage(menu_instance, feed_node)
+            persistFeedState(menu_instance, feed_node)
         end
 
         if menu_instance and menu_instance.page_info then
@@ -2939,69 +2940,104 @@ function MenuBuilder:showCommaFeedFeed(account, client, feed_node, opts)
 
     finalizeMenu()
 end
-function MenuBuilder:showFreshRSSAccount(account, opts)      
-    opts = opts or {}      
-    if not self.accounts or type(self.accounts.getFreshRSSClient) ~= "function" then      
-        UIManager:show(InfoMessage:new{      
-            text = _("FreshRSS integration is not available."),      
-        })      
-        return      
-    end      
-      
-    local client, err = self.accounts:getFreshRSSClient(account)      
-    if not client then      
-        UIManager:show(InfoMessage:new{      
-            text = err or _("Unable to open FreshRSS account."),      
-        })      
-        return      
-    end      
-      
-    -- Build feed nodes dynamically from configuration  
-    local children = {}
-    -- Always Build a tree with the Today feed as a child node  
-    table.insert(children, {  
-        kind = "feed",  
-        id = "freshrss_today_unread",  
-        title = _("Today (Unread)"),  
-        api_feed_id = "user/-/state/com.google/reading-list",  
-        is_special_feed = true,  
-        feed = { unreadCount = 0 }  
-    })  
-    table.insert(children, {  
-        kind = "feed",  
-        id = "freshrss_all",  
-        title = _("All Unread"),
-        api_feed_id = "user/-/state/com.google/reading-list",  
-        is_special_feed = true,
-        feed = { unreadCount = 0 }  
-    })  
-      
-    -- Add configured special feeds  
-    if account.special_feeds and type(account.special_feeds) == "table" then  
-        for _, special_feed in ipairs(account.special_feeds) do  
-            if special_feed.id then  
-                -- Convert feed ID to internal ID (replace "/" with "_")  
-                local internal_id = "freshrss_" .. special_feed.id:gsub("/", "_") .. "_unread"  
-                  
-                table.insert(children, {  
-                    kind = "feed",  
-                    id = internal_id,  
-                    title = special_feed.title or special_feed.id,  
-                    api_feed_id = special_feed.id,  
-                    is_special_feed = true,  
-                    feed = { unreadCount = 0 }  
-                })  
-            end  
-        end  
-    end  
-      
-    local tree = {  
-        kind = "root",  
-        title = account.name or "FreshRSS",  
-        children = children  
-    }  
-      
-    self:showFreshRSSNode(account, client, tree)  
+
+function MenuBuilder:showFreshRSSAccount(account, opts)
+    opts = opts or {}
+    if not self.accounts or type(self.accounts.getFreshRSSClient) ~= "function" then
+        UIManager:show(InfoMessage:new{
+            text = _("FreshRSS integration is not available."),
+        })
+        return
+    end
+
+    local client, err = self.accounts:getFreshRSSClient(account)
+    if not client then
+        UIManager:show(InfoMessage:new{
+            text = err or _("Unable to open FreshRSS account."),
+        })
+        return
+    end
+
+    local function buildSpecialChildren()
+        local children = {}
+
+        table.insert(children, {
+            kind = "feed",
+            id = "freshrss_today_unread",
+            title = _("Today (Unread)"),
+            api_feed_id = "user/-/state/com.google/reading-list",
+            is_special_feed = true,
+            feed = { unreadCount = 0 },
+        })
+
+        table.insert(children, {
+            kind = "feed",
+            id = "freshrss_all",
+            title = _("All Unread"),
+            api_feed_id = "user/-/state/com.google/reading-list",
+            is_special_feed = true,
+            feed = { unreadCount = 0 },
+        })
+
+        if account.special_feeds and type(account.special_feeds) == "table" then
+            for _, special_feed in ipairs(account.special_feeds) do
+                if special_feed.id then
+                    local internal_id = "freshrss_" .. special_feed.id:gsub("/", "_") .. "_unread"
+
+                    table.insert(children, {
+                        kind = "feed",
+                        id = internal_id,
+                        title = special_feed.title or special_feed.id,
+                        api_feed_id = special_feed.id,
+                        is_special_feed = true,
+                        feed = { unreadCount = 0 },
+                    })
+                end
+            end
+        end
+
+        return children
+    end
+
+    local function showWithTree(tree)
+        local base_children = (tree and tree.children) or {}
+        local merged_children = {}
+
+        local special_children = buildSpecialChildren()
+        for _, node in ipairs(special_children) do
+            table.insert(merged_children, node)
+        end
+
+        for _, node in ipairs(base_children) do
+            table.insert(merged_children, node)
+        end
+
+        local decorated_tree = {
+            kind = "root",
+            title = (tree and tree.title) or account.name or "FreshRSS",
+            children = merged_children,
+            feeds = tree and tree.feeds or nil,
+        }
+
+        self:showFreshRSSNode(account, client, decorated_tree)
+    end
+
+    if not opts.force_refresh and client.tree_cache then
+        showWithTree(client.tree_cache)
+        return
+    end
+
+    NetworkMgr:runWhenOnline(function()
+        local ok, tree_or_err = client:buildTree()
+        if not ok then
+            UIManager:show(InfoMessage:new{
+                text = tree_or_err or _("Failed to load FreshRSS subscriptions."),
+            })
+            return
+        end
+
+        showWithTree(tree_or_err)
+    end)
 end
 
 function MenuBuilder:showFreshRSSNode(account, client, node)
@@ -3034,13 +3070,6 @@ function MenuBuilder:showFreshRSSNode(account, client, node)
                 hold_keep_menu_open = true,
             })
         end
-    end
-
-    local function menu_hold_handler(_, item)
-        if item and type(item.hold_callback) == "function" then
-            item.hold_callback()
-        end
-        return true
     end
 
     if #entries == 0 then

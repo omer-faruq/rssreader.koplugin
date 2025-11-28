@@ -237,9 +237,9 @@ function FreshRSS:fetchStructure(force)
         return false, subs_data
     end
 
-    -- 2. Get all tags (folders)
-    local ok, tags_data = self:authorizedRequest("GET", "/api/greader.php/reader/api/0/tag/list", { output = "json" })
-    if not ok then
+    -- 2. Get all tags (labels / folders)
+    local ok2, tags_data = self:authorizedRequest("GET", "/api/greader.php/reader/api/0/tag/list", { output = "json" })
+    if not ok2 then
         return false, tags_data
     end
 
@@ -249,23 +249,53 @@ end
 
 function FreshRSS:buildTreeFromData(subs_data, tags_data)
     local feeds_map = {}
-    local feeds_in_folders = {}
     local folders = {}
     local folders_map = {}
+    local tag_labels = {}
 
-    -- Process tags (folders)
+    -- Collect human-friendly labels from tag list
     for _, tag in ipairs(tags_data.tags or {}) do
-        if tag.type == "folder" then
-            local folder_id = tag.id
-            local folder_node = {
-                kind = "folder",
-                id = folder_id,
-                title = (tag.label or folder_id:match("user/-/label/(.*)")) or "Folder",
-                children = {},
-            }
-            folders[#folders + 1] = folder_node
-            folders_map[folder_id] = folder_node
+        local tag_id = tag.id
+        if type(tag_id) == "string" and tag_id:match("^user/%-/label/") then
+            local label = tag.label or tag_id:match("user/%-/label/(.*)")
+            if type(label) == "string" and label ~= "" then
+                tag_labels[tag_id] = label
+            end
         end
+    end
+
+    local function ensureFolder(category)
+        if type(category) ~= "table" then
+            return nil
+        end
+        local cat_id = category.id
+        if type(cat_id) ~= "string" then
+            return nil
+        end
+        -- Only treat user labels as folders, ignore state tags like .../state/...
+        if not cat_id:match("^user/%-/label/") then
+            return nil
+        end
+
+        local folder = folders_map[cat_id]
+        if folder then
+            return folder
+        end
+
+        local title = category.label
+            or tag_labels[cat_id]
+            or cat_id:match("user/%-/label/(.*)")
+            or "Folder"
+
+        folder = {
+            kind = "folder",
+            id = cat_id,
+            title = title,
+            children = {},
+        }
+        folders_map[cat_id] = folder
+        table.insert(folders, folder)
+        return folder
     end
 
     -- Process subscriptions (feeds)
@@ -278,7 +308,7 @@ function FreshRSS:buildTreeFromData(subs_data, tags_data)
                 id = feed.id,
                 title = feed.title,
                 url = feed.htmlUrl,
-                feed_url = feed.id:gsub("^feed/", ""),
+                feed_url = (type(feed.id) == "string" and feed.id:gsub("^feed/", "")) or feed.id,
                 unreadCount = feed.unreadCount or 0,
             },
         }
@@ -286,18 +316,15 @@ function FreshRSS:buildTreeFromData(subs_data, tags_data)
 
         local added_to_folder = false
         for _, category in ipairs(feed.categories or {}) do
-            if category.type == "folder" then
-                local folder = folders_map[category.id]
-                if folder then
-                    table.insert(folder.children, feed_node)
-                    feeds_in_folders[feed.id] = true
-                    added_to_folder = true
-                end
+            local folder = ensureFolder(category)
+            if folder then
+                table.insert(folder.children, feed_node)
+                added_to_folder = true
             end
         end
 
         if not added_to_folder then
-            -- Add to root
+            -- Feeds without any label appear at the root level
             table.insert(folders, feed_node)
         end
     end
@@ -310,14 +337,8 @@ function FreshRSS:buildTreeFromData(subs_data, tags_data)
     }
 end
 
-function FreshRSS:buildTree(force)  
-    -- Return minimal tree for Today-only mode  
-    return true, {  
-        kind = "root",  
-        title = (self.account and self.account.name) or "FreshRSS",  
-        children = {},  
-        feeds = {},  
-    }  
+function FreshRSS:buildTree(force)
+    return self:fetchStructure(force)
 end
 
 local function normalizeEntry(entry)
