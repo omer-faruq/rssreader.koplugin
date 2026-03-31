@@ -29,6 +29,7 @@ local HtmlSanitizer = require("rssreader_html_sanitizer")
 local HtmlResources = require("rssreader_html_resources")
 local FiveFiltersSanitizer = require("sanitizers/rssreader_sanitizer_fivefilters")
 local DiffbotSanitizer = require("sanitizers/rssreader_sanitizer_diffbot")
+local InstaparserSanitizer = require("sanitizers/rssreader_sanitizer_instaparser")
 
 local function getStartOfTodayTimestamp()
     local now_t = os.date("*t")
@@ -851,6 +852,21 @@ local function fetchStoryContent(story, builder, on_complete, options)
                         end
 
                         finalizeContent(diffbot_html, true)
+                    end)
+                elseif sanitizer_type == "instaparser" then
+                    InstaparserSanitizer.fetchArticle(sanitizer, link, function(content, err)
+                        if not content then
+                            processSanitizer(index + 1)
+                            return
+                        end
+
+                        local instaparser_html = InstaparserSanitizer.parseResponse(content)
+                        if not instaparser_html or not InstaparserSanitizer.contentIsMeaningful(instaparser_html) then
+                            processSanitizer(index + 1)
+                            return
+                        end
+
+                        finalizeContent(instaparser_html, true)
                     end)
                 else
                     logger.info("RSSReader", "Unknown sanitizer type", sanitizer.type)

@@ -47,7 +47,7 @@ return {
             active = false, -- set to true to enable this account
         },
     },
-    sanitizers = { -- available types = fivefilters, diffbot
+    sanitizers = { -- available types = fivefilters, diffbot, instaparser
         {  
             order = 1,  
             type = "fivefilters",  
@@ -64,6 +64,12 @@ return {
             type = "diffbot",
             active = false,
             token = "your_diffbot_token", -- get your token here: https://app.diffbot.com/
+        },
+        {
+            order = 4,
+            type = "instaparser",
+            active = false,
+            token = "your_instaparser_token", -- get your token here: https://instaparser.com/
         },
     },
     features = {
