@@ -30,6 +30,8 @@ local HtmlResources = require("rssreader_html_resources")
 local FiveFiltersSanitizer = require("sanitizers/rssreader_sanitizer_fivefilters")
 local DiffbotSanitizer = require("sanitizers/rssreader_sanitizer_diffbot")
 local InstaparserSanitizer = require("sanitizers/rssreader_sanitizer_instaparser")
+local InputDialog = require("ui/widget/inputdialog")
+local OPMLHandler = require("rssreader_opml")
 
 local function getStartOfTodayTimestamp()
     local now_t = os.date("*t")
@@ -2224,9 +2226,128 @@ function MenuBuilder:showSettingsPopup()
                     self:clearCacheDirectory()
                 end,
             }},
+            {{
+                text = _("Import from OPML"),
+                align = "left",
+                callback = function()
+                    UIManager:close(dialog)
+                    self:showOPMLImport()
+                end,
+            }},
+            {{
+                text = _("Export to OPML"),
+                align = "left",
+                callback = function()
+                    UIManager:close(dialog)
+                    self:performOPMLExport()
+                end,
+            }},
         },
     }
     UIManager:show(dialog)
+end
+
+function MenuBuilder:showOPMLImport()
+    -- Find OPML files in plugin directory
+    local files = OPMLHandler.findOPMLFiles()
+    if #files == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("No OPML/XML files found in plugin directory.\n\nPlace an .opml or .xml file in:\n") .. OPMLHandler.getPluginDir(),
+        })
+        return
+    end
+
+    if #files == 1 then
+        -- Only one file, use it directly
+        self:showOPMLImportNameDialog(files[1].path, files[1].name)
+    else
+        -- Multiple files, let user pick
+        local entries = {}
+        for _, file in ipairs(files) do
+            table.insert(entries, {
+                text = file.name,
+                callback = function()
+                    UIManager:close(self._opml_file_menu)
+                    self._opml_file_menu = nil
+                    self:showOPMLImportNameDialog(file.path, file.name)
+                end,
+            })
+        end
+        self._opml_file_menu = Menu:new{
+            title = _("Select OPML file to import"),
+            item_table = entries,
+        }
+        self:showMenu(self._opml_file_menu)
+    end
+end
+
+function MenuBuilder:showOPMLImportNameDialog(opml_path, filename)
+    -- Suggest account name from filename (strip extension)
+    local suggested = filename:gsub("%.opml$", ""):gsub("%.xml$", "")
+    local input_dialog
+    input_dialog = InputDialog:new{
+        title = _("Account name for imported feeds"),
+        input = suggested,
+        buttons = {{
+            {
+                text = _("Cancel"),
+                id = "close",
+                callback = function()
+                    UIManager:close(input_dialog)
+                end,
+            },
+            {
+                text = _("Import"),
+                is_enter_default = true,
+                callback = function()
+                    local name = input_dialog:getInputText()
+                    UIManager:close(input_dialog)
+                    if not name or name == "" then
+                        UIManager:show(InfoMessage:new{
+                            text = _("Account name cannot be empty."),
+                        })
+                        return
+                    end
+                    self:executeOPMLImport(opml_path, name)
+                end,
+            },
+        }},
+    }
+    UIManager:show(input_dialog)
+    input_dialog:onShowKeyboard()
+end
+
+function MenuBuilder:executeOPMLImport(opml_path, account_name)
+    local ok, result = OPMLHandler.performImport(opml_path, account_name)
+    if not ok then
+        UIManager:show(InfoMessage:new{
+            text = _("Import failed: ") .. tostring(result),
+        })
+        return
+    end
+    UIManager:show(InfoMessage:new{
+        text = string.format(
+            _("Successfully imported %d feeds into account '%s'.\n\nPlease restart KOReader for changes to take effect."),
+            result, account_name
+        ),
+    })
+end
+
+function MenuBuilder:performOPMLExport()
+    local export_path = OPMLHandler.getDefaultExportPath()
+    local ok, result = OPMLHandler.performExport(export_path)
+    if not ok then
+        UIManager:show(InfoMessage:new{
+            text = _("Export failed: ") .. tostring(result),
+        })
+        return
+    end
+    UIManager:show(InfoMessage:new{
+        text = string.format(
+            _("Successfully exported %d feeds to:\n%s"),
+            result, export_path
+        ),
+    })
 end
 
 function MenuBuilder:clearCacheDirectory()

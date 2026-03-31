@@ -47,7 +47,38 @@ Mix and match the sanitizers to suit your feeds. Keep the most reliable option f
 
 ### Mark All as Read
 - **Long-press any feed title** to open the contextual menu.
-- Choose **Mark all as read** to update the read state for every story in that feed. 
+- Choose **Mark all as read** to update the read state for every story in that feed.
+
+## OPML Import/Export
+The plugin supports importing and exporting feeds in OPML format, making it easy to migrate feeds from other RSS readers or backup your current subscriptions.
+
+### Importing Feeds from OPML
+1. Place your `.opml` or `.xml` file in the plugin directory (`plugins/rssreader.koplugin/`)
+2. Open **RSS Reader** from the main menu
+3. Tap **Settings** → **Import from OPML**
+4. If multiple OPML files are found, select the one you want to import
+5. Enter a name for the new local account that will contain the imported feeds
+6. Tap **Import**
+7. **Restart KOReader** for the changes to take effect
+
+The import process will:
+- Parse the OPML file and extract all feeds and groups/folders
+- Create a new local account entry in `rssreader_configuration.lua`
+- Add all feeds and groups to `rssreader_local_defaults.lua` under the new account name
+- Preserve the folder structure from the OPML file as groups
+
+### Exporting Feeds to OPML
+1. Open **RSS Reader** from the main menu
+2. Tap **Settings** → **Export to OPML**
+3. The plugin will export all local accounts to `export.opml` in the plugin directory
+
+The exported OPML file includes:
+- All local accounts as top-level folders
+- All groups within each account as nested folders
+- All feeds with their titles and URLs
+- Standard OPML 2.0 format compatible with most RSS readers
+
+**Note**: Only local accounts are included in the export. NewsBlur, CommaFeed, and FreshRSS accounts are managed by their respective services and are not exported.
 
 ## Ready-to-Use Defaults
 - If you need a template, use `rssreader_configuration.sample.lua` and rename it to `rssreader_configuration.lua` after customizing.
