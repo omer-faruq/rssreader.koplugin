@@ -963,6 +963,40 @@ local function buildUniqueTargetPathWithExtension(directory, base_name, extensio
     return candidate
 end
 
+function MenuBuilder:createTapCallback(stories, index, context)
+    local reader = self.reader
+    local tap_action = "preview"
+    if reader and type(reader.getTapAction) == "function" then
+        tap_action = reader:getTapAction()
+    end
+    
+    local story = stories[index]
+    
+    if tap_action == "open" then
+        return function()
+            normalizeStoryReadState(story)
+            if isUnread(story) then
+                self:handleStoryAction(stories, index, "mark_read", story, context)
+            end
+            self:handleStoryAction(stories, index, "go_to_link", { story = story }, context)
+        end
+    elseif tap_action == "save" then
+        return function()
+            normalizeStoryReadState(story)
+            if isUnread(story) then
+                self:handleStoryAction(stories, index, "mark_read", story, context)
+            end
+            self:handleStoryAction(stories, index, "save_story", { story = story }, context)
+        end
+    else
+        return function()
+            self:showStory(stories, index, function(action, payload)
+                self:handleStoryAction(stories, index, action, payload, context)
+            end, nil, nil, context)
+        end
+    end
+end
+
 function MenuBuilder:showStory(stories, index, on_action, on_close, options, context)
     self.story_viewer = self.story_viewer or StoryViewer:new()
     local reader = self.reader
@@ -2036,17 +2070,16 @@ function MenuBuilder:showLocalFeed(feed, opts)
             normalizeStoryReadState(story)
             normalizeStoryLink(story)
             local entry_is_unread = isUnread(story)
-            local function openStory()
-                self:showStory(stories, index, function(action, payload)
-                    self:handleStoryAction(stories, index, action, payload, context)
-                end, nil, nil, context)
-            end
             table.insert(entries, {
                 text = decoratedStoryTitle(story, true),
                 bold = entry_is_unread,
-                callback = openStory,
+                callback = self:createTapCallback(stories, index, context),
                 hold_callback = function()
-                    self:createStoryLongPressMenu(stories, index, context, openStory)
+                    self:createStoryLongPressMenu(stories, index, context, function()
+                        self:showStory(stories, index, function(action, payload)
+                            self:handleStoryAction(stories, index, action, payload, context)
+                        end, nil, nil, context)
+                    end)
                 end,
                 hold_keep_menu_open = true,
             })
@@ -2219,6 +2252,14 @@ function MenuBuilder:showSettingsPopup()
         title = _("Settings"),
         buttons = {
             {{
+                text = _("Tap action on feed items"),
+                align = "left",
+                callback = function()
+                    UIManager:close(dialog)
+                    self:showTapActionPopup()
+                end,
+            }},
+            {{
                 text = _("Clear cache"),
                 align = "left",
                 callback = function()
@@ -2240,6 +2281,52 @@ function MenuBuilder:showSettingsPopup()
                 callback = function()
                     UIManager:close(dialog)
                     self:performOPMLExport()
+                end,
+            }},
+        },
+    }
+    UIManager:show(dialog)
+end
+
+function MenuBuilder:showTapActionPopup()
+    local reader = self.reader
+    local current_action = "preview"
+    if reader and type(reader.getTapAction) == "function" then
+        current_action = reader:getTapAction()
+    end
+    
+    local dialog
+    dialog = ButtonDialog:new{
+        title = _("Tap action on feed items"),
+        buttons = {
+            {{
+                text = current_action == "preview" and "✓ " .. _("Show preview") or _("Show preview"),
+                align = "left",
+                callback = function()
+                    if reader and type(reader.setTapAction) == "function" then
+                        reader:setTapAction("preview")
+                    end
+                    UIManager:close(dialog)
+                end,
+            }},
+            {{
+                text = current_action == "open" and "✓ " .. _("Open directly") or _("Open directly"),
+                align = "left",
+                callback = function()
+                    if reader and type(reader.setTapAction) == "function" then
+                        reader:setTapAction("open")
+                    end
+                    UIManager:close(dialog)
+                end,
+            }},
+            {{
+                text = current_action == "save" and "✓ " .. _("Save only") or _("Save only"),
+                align = "left",
+                callback = function()
+                    if reader and type(reader.setTapAction) == "function" then
+                        reader:setTapAction("save")
+                    end
+                    UIManager:close(dialog)
                 end,
             }},
         },
@@ -2644,17 +2731,16 @@ function MenuBuilder:showNewsBlurFeed(account, client, feed_node, opts)
         for index, story in ipairs(stories) do
             normalizeStoryReadState(story)
             normalizeStoryLink(story)
-            local function openStory()
-                self:showStory(stories, index, function(action, payload)
-                    self:handleStoryAction(stories, index, action, payload, context)
-                end, nil, { disable_story_mutators = true }, context)
-            end
             table.insert(entries, {
                 text = decoratedStoryTitle(story, true),
                 bold = isUnread(story),
-                callback = openStory,
+                callback = self:createTapCallback(stories, index, context),
                 hold_callback = function()
-                    self:createStoryLongPressMenu(stories, index, context, openStory)
+                    self:createStoryLongPressMenu(stories, index, context, function()
+                        self:showStory(stories, index, function(action, payload)
+                            self:handleStoryAction(stories, index, action, payload, context)
+                        end, nil, { disable_story_mutators = true }, context)
+                    end)
                 end,
                 hold_keep_menu_open = true,
             })
@@ -2940,17 +3026,16 @@ function MenuBuilder:showCommaFeedFeed(account, client, feed_node, opts)
         local entries = {}
         for index, story in ipairs(stories) do
             normalizeStoryLink(story)
-            local function openStory()
-                self:showStory(stories, index, function(action, payload)
-                    self:handleStoryAction(stories, index, action, payload, context)
-                end, nil, { disable_story_mutators = true }, context)
-            end
             table.insert(entries, {
                 text = decoratedStoryTitle(story, true),
                 bold = isUnread(story),
-                callback = openStory,
+                callback = self:createTapCallback(stories, index, context),
                 hold_callback = function()
-                    self:createStoryLongPressMenu(stories, index, context, openStory)
+                    self:createStoryLongPressMenu(stories, index, context, function()
+                        self:showStory(stories, index, function(action, payload)
+                            self:handleStoryAction(stories, index, action, payload, context)
+                        end, nil, { disable_story_mutators = true }, context)
+                    end)
                 end,
                 hold_keep_menu_open = true,
             })
@@ -3312,17 +3397,16 @@ function MenuBuilder:showFreshRSSFeed(account, client, feed_node, opts)
         local entries = {}
         for index, story in ipairs(stories) do
             normalizeStoryLink(story)
-            local function openStory()
-                self:showStory(stories, index, function(action, payload)
-                    self:handleStoryAction(stories, index, action, payload, context)
-                end, nil, nil, context)
-            end
             table.insert(entries, {
                 text = decoratedStoryTitle(story, true),
                 bold = isUnread(story),
-                callback = openStory,
+                callback = self:createTapCallback(stories, index, context),
                 hold_callback = function()
-                    self:createStoryLongPressMenu(stories, index, context, openStory)
+                    self:createStoryLongPressMenu(stories, index, context, function()
+                        self:showStory(stories, index, function(action, payload)
+                            self:handleStoryAction(stories, index, action, payload, context)
+                        end, nil, nil, context)
+                    end)
                 end,
                 hold_keep_menu_open = true,
             })

@@ -461,6 +461,14 @@ function RSSReader:restoreCommaFeedFeed(builder, account, feed_state)
     builder:showCommaFeedFeed(account, client, feed_node, { reuse = true, menu_page = feed_state.menu_page })
 end
 
+function RSSReader:getTapAction()
+    return G_reader_settings:readSetting("rssreader_tap_action", "preview")
+end
+
+function RSSReader:setTapAction(action)
+    G_reader_settings:saveSetting("rssreader_tap_action", action)
+end
+
 function RSSReader:onDispatcherRegisterActions()
     Dispatcher:registerAction("rssreader_open", {
         category = "none",
