@@ -29,6 +29,15 @@ The other Lua files handle internal logic. End users do not need to open or modi
 - In the feed list, a long press lets you open the original website, save the article, or toggle read/unread.
 - For local accounts, the groups and feeds defined in your renamed `rssreader_local_defaults.lua` appear. Editing the URLs here is how you add new sources.
 
+## Tap Action on Feed Items
+Configure what happens when you tap a story in the feed list:
+- Open **RSS Reader** → **Settings** → **Tap action on feed items**
+- Choose one of three modes:
+  - **Show preview** (default) – Opens the story preview screen
+  - **Open directly** – Downloads and opens the story immediately
+  - **Save only** – Downloads the story without opening it
+- The setting applies to all account types (local, NewsBlur, CommaFeed, FreshRSS)
+
 ## Image Download Settings
 The `features` block in `rssreader_configuration.lua` controls how the plugin fetches and displays article images. Three switches let you balance visual richness with bandwidth and storage:
 
