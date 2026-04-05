@@ -111,6 +111,10 @@ local function normalizeEntry(entry)
         story.feed_id = feed_id_str
         story.story_feed_id = feed_id_str
     end
+    local feed_name = entry.feedName or entry.feed_name or entry.feedTitle or entry.feed_title
+    if feed_name ~= nil and feed_name ~= "" then
+        story.feed_title = feed_name
+    end
     local title = entry.title or entry.name or entry.url or ""
     story.title = title
     story.story_title = title
@@ -298,6 +302,24 @@ local function convertCategoryToNodes(category, feeds_map)
     end
 
     local category_id = category.id or category.name or ""
+    
+    table.insert(node_children, 1, {
+        kind = "feed",
+        id = "__commafeed_category_unread__" .. tostring(category_id),
+        title = "★ All Unread",
+        _virtual = true,
+        _read_filter = "unread",
+        _category_id = tostring(category_id),
+    })
+    table.insert(node_children, 1, {
+        kind = "feed",
+        id = "__commafeed_category_all__" .. tostring(category_id),
+        title = "★ All Feeds",
+        _virtual = true,
+        _read_filter = "all",
+        _category_id = tostring(category_id),
+    })
+    
     local title = category.name or category_id or "Category"
     return {
         kind = "folder",
@@ -343,6 +365,21 @@ function CommaFeed:buildTree(force)
         end
     end
 
+    table.insert(children, 1, {
+        kind = "feed",
+        id = "__commafeed_all_unread__",
+        title = "★ All Unread",
+        _virtual = true,
+        _read_filter = "unread",
+    })
+    table.insert(children, 1, {
+        kind = "feed",
+        id = "__commafeed_all_feeds__",
+        title = "★ All Feeds",
+        _virtual = true,
+        _read_filter = "all",
+    })
+
     self.tree_cache = {
         kind = "root",
         title = (self.account and self.account.name) or "CommaFeed",
@@ -362,6 +399,57 @@ end
 function CommaFeed:fetchStories(feed_id, options)
     if not feed_id then
         return false, "Missing feed identifier."
+    end
+
+    local is_virtual_all = feed_id == "__commafeed_all_feeds__" or feed_id == "__commafeed_all_unread__"
+    local is_category_virtual = feed_id:match("^__commafeed_category_")
+    
+    if is_virtual_all or is_category_virtual then
+        local page = (options and options.page) or 1
+        if page < 1 then
+            page = 1
+        end
+
+        local limit = 50
+        local offset = (page - 1) * limit
+
+        local read_type = "all"
+        local category_id = "all"
+        
+        if feed_id == "__commafeed_all_unread__" then
+            read_type = "unread"
+        elseif feed_id:match("^__commafeed_category_unread__") then
+            read_type = "unread"
+            category_id = feed_id:gsub("^__commafeed_category_unread__", "")
+        elseif feed_id:match("^__commafeed_category_all__") then
+            read_type = "all"
+            category_id = feed_id:gsub("^__commafeed_category_all__", "")
+        end
+
+        local query = {
+            id = category_id,
+            limit = limit,
+            offset = offset,
+            readType = read_type,
+            order = "desc",
+        }
+
+        local ok, data_or_err = self:performRestRequest("GET", "/category/entries", query)
+        if not ok then
+            return false, data_or_err
+        end
+
+        local stories = {}
+        for _, entry in ipairs(data_or_err.entries or {}) do
+            table.insert(stories, normalizeEntry(entry))
+        end
+
+        local has_more = data_or_err.hasMore == true
+
+        return true, {
+            stories = stories,
+            more_stories = has_more,
+        }
     end
 
     local id_str = tostring(feed_id)

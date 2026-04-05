@@ -81,6 +81,11 @@ local function normalizeStory(entry)
         story.feed_id = feed_id
     end
 
+    local feed_title = entry.story_feed_title or entry.feed_title
+    if feed_title ~= nil and feed_title ~= "" then
+        story.feed_title = feed_title
+    end
+
     local title = entry.story_title or entry.title or entry.story_permalink or entry.story_hash or entry.id
     story.story_title = title
     story.title = title
@@ -341,7 +346,7 @@ local function buildFeedNode(feed_id, feed_data)
     }
 end
 
-function NewsBlur:parseFolderList(folder_list, feeds)
+function NewsBlur:parseFolderList(folder_list, feeds, show_all_feeds)
     local nodes = {}
     if type(folder_list) ~= "table" then
         return nodes
@@ -356,10 +361,12 @@ function NewsBlur:parseFolderList(folder_list, feeds)
             end
         elseif entry_type == "table" then
             for folder_name, children in pairs(entry) do
+                local folder_children = self:parseFolderList(children, feeds, show_all_feeds)
+                
                 table.insert(nodes, {
                     kind = "folder",
                     title = folder_name,
-                    children = self:parseFolderList(children, feeds),
+                    children = folder_children,
                 })
             end
         end
@@ -380,7 +387,12 @@ function NewsBlur:buildTree(force)
     local feeds = data_or_err.feeds or {}
     local folders = data_or_err.folders or {}
 
-    local children = self:parseFolderList(folders, feeds)
+    local show_all_feeds = true
+    if G_reader_settings then
+        show_all_feeds = G_reader_settings:nilOrTrue("rssreader_newsblur_show_all_feeds")
+    end
+
+    local children = self:parseFolderList(folders, feeds, show_all_feeds)
 
     -- Include feeds that may not appear in any folder
     local present = {}
@@ -400,6 +412,28 @@ function NewsBlur:buildTree(force)
         end
     end
 
+    local show_all_feeds = true
+    if G_reader_settings then
+        show_all_feeds = G_reader_settings:nilOrTrue("rssreader_newsblur_show_all_feeds")
+    end
+    
+    if show_all_feeds then
+        table.insert(children, 1, {
+            kind = "feed",
+            id = "__newsblur_all_unread__",
+            title = "★ All Unread",
+            _virtual = true,
+            _read_filter = "unread",
+        })
+        table.insert(children, 1, {
+            kind = "feed",
+            id = "__newsblur_all_feeds__",
+            title = "★ All Feeds",
+            _virtual = true,
+            _read_filter = "all",
+        })
+    end
+
     self.tree_cache = {
         kind = "root",
         title = self.account and self.account.name or "NewsBlur",
@@ -413,6 +447,60 @@ function NewsBlur:fetchStories(feed_id, options)
     if not feed_id then
         return false, "Missing feed identifier."
     end
+
+    local is_virtual_all = feed_id == "__newsblur_all_feeds__" or feed_id == "__newsblur_all_unread__"
+    
+    if is_virtual_all then
+        local params = {
+            include_story_content = 1,
+            order = "newest",
+            limit = 50,
+        }
+        
+        if feed_id == "__newsblur_all_unread__" then
+            params.read_filter = "unread"
+        else
+            params.read_filter = (options and options.read_filter) or "all"
+        end
+        
+        local page = options and options.page
+        if page then
+            params.page = page
+        end
+        local request_url = self.BASE_URL .. "/reader/river_stories"
+        if page then
+            request_url = string.format("%s?page=%s", request_url, url.escape(tostring(page)))
+            params.page = nil
+        end
+        local ok, data_or_err = self:authorizedRequest({
+            url = request_url,
+            method = "POST",
+            body = encodeForm(params),
+        })
+        if not ok then
+            return false, data_or_err
+        end
+
+        if data_or_err.message and type(data_or_err.message) == "string" then
+            if data_or_err.message:lower():match("premium") then
+                return false, "NewsBlur Premium required: " .. data_or_err.message
+            end
+        end
+
+        local result = {
+            stories = {},
+            more_stories = data_or_err.more_stories or data_or_err.has_more or data_or_err.stories_remaining,
+        }
+
+        if type(data_or_err.stories) == "table" then
+            for _, entry in ipairs(data_or_err.stories) do
+                table.insert(result.stories, normalizeStory(entry))
+            end
+        end
+
+        return true, result
+    end
+
     local params = {
         include_story_content = 1,
         order = "newest",

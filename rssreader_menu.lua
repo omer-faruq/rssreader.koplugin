@@ -243,8 +243,12 @@ local function decoratedStoryTitle(story, decorate)
         title = string.format("%s • %s", _("NEW"), title)
     end
 
-    if story.feed_title and story.feed_title ~= "" then  
-        title = "[" .. story.feed_title .. "]" .. " • " .. title
+    if story.feed_title and story.feed_title ~= "" then
+        local feed_prefix = story.feed_title
+        if #feed_prefix > 5 then
+            feed_prefix = feed_prefix:sub(1, 5)
+        end
+        title = "[" .. feed_prefix .. "]" .. " • " .. title
     end  
 
     local date_label = formatStoryDate(story)
@@ -1796,6 +1800,14 @@ function MenuBuilder:performMarkAllAsRead(account, client, node)
     local account_type = account and account.type
 
     if node_type == "feed" then
+        if node._virtual then
+            UIManager:show(InfoMessage:new{
+                text = _("Mark all as read is not supported for virtual feeds. Please use individual feeds."),
+                timeout = 3,
+            })
+            return
+        end
+        
         -- Mark single feed as read
         UIManager:show(InfoMessage:new{
             text = string.format(_("Marking feed '%s' as read..."), node.title or _("Feed")),
@@ -1950,7 +1962,7 @@ function MenuBuilder:calculateFolderUnreadCount(node)
     end
     local total = 0
     for _, child in ipairs(node.children) do
-        if child.kind == "feed" then
+        if child.kind == "feed" and child.feed then
             total = total + ((child.feed.ps or 0) + (child.feed.nt or 0))
         elseif child.kind == "folder" then
             total = total + self:calculateFolderUnreadCount(child)
@@ -2263,6 +2275,8 @@ function MenuBuilder:buildAccountEntries(accounts, open_callback)
 end
 
 function MenuBuilder:showSettingsPopup()
+    local show_newsblur_all = G_reader_settings:nilOrTrue("rssreader_newsblur_show_all_feeds")
+    
     local dialog
     dialog = ButtonDialog:new{
         title = _("Settings"),
@@ -2273,6 +2287,32 @@ function MenuBuilder:showSettingsPopup()
                 callback = function()
                     UIManager:close(dialog)
                     self:showTapActionPopup()
+                end,
+            }},
+            {{
+                text = show_newsblur_all and "✓ " .. _("Show NewsBlur 'All Feeds'") or _("Show NewsBlur 'All Feeds'"),
+                align = "left",
+                callback = function()
+                    UIManager:close(dialog)
+                    local new_value = not show_newsblur_all
+                    G_reader_settings:saveSetting("rssreader_newsblur_show_all_feeds", new_value)
+                    
+                    if self.accounts and type(self.accounts.getAccounts) == "function" then
+                        local all_accounts = self.accounts:getAccounts()
+                        for _, account in ipairs(all_accounts or {}) do
+                            if account.type == "newsblur" then
+                                local client = self.accounts:getNewsBlurClient(account)
+                                if client and client.buildTree then
+                                    client.tree_cache = nil
+                                    client.subscriptions_cache = nil
+                                end
+                            end
+                        end
+                    end
+                    
+                    UIManager:show(InfoMessage:new{
+                        text = new_value and _("NewsBlur 'All Feeds' enabled. Please reopen NewsBlur accounts.") or _("NewsBlur 'All Feeds' disabled. Please reopen NewsBlur accounts."),
+                    })
                 end,
             }},
             {{
@@ -2648,7 +2688,10 @@ function MenuBuilder:showNewsBlurNode(account, client, node)
                 callback = normal_callback,
             })
         elseif child.kind == "feed" then
-            local unread_count = (child.feed.ps or 0) + (child.feed.nt or 0)
+            local unread_count = 0
+            if child.feed then
+                unread_count = (child.feed.ps or 0) + (child.feed.nt or 0)
+            end
             local display_title = child.title or _("Untitled feed")
             if unread_count > 0 then
                 display_title = display_title .. " (" .. tostring(unread_count) .. ")"
@@ -2940,7 +2983,10 @@ function MenuBuilder:showCommaFeedNode(account, client, node)
             local normal_callback = function()
                 self:showCommaFeedFeed(account, client, child)
             end
-            local unread_count = child.feed.unreadCount or 0
+            local unread_count = 0
+            if child.feed then
+                unread_count = child.feed.unreadCount or 0
+            end
             local display_title = child.title or _("Untitled feed")
             if unread_count > 0 then
                 display_title = display_title .. " (" .. tostring(unread_count) .. ")"

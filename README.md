@@ -29,6 +29,24 @@ The other Lua files handle internal logic. End users do not need to open or modi
 - In the feed list, a tap performs the action you configured (see "Tap Action on Feed Items" below), while a long press always shows all options: preview, open directly, save, and toggle read/unread.
 - For local accounts, the groups and feeds defined in your renamed `rssreader_local_defaults.lua` appear. Editing the URLs here is how you add new sources.
 
+## Virtual "All Feeds" Aggregated Views
+NewsBlur and CommaFeed accounts now include special virtual feeds that aggregate stories from all your subscriptions:
+- **★ All Feeds** – View all stories from all subscribed feeds in a single chronological list
+- **★ All Unread** – View only unread stories from all feeds combined
+- Stories are prefixed with their feed name (max 5 characters) for easy identification
+- Pagination support: Use the "More" button to load additional stories (50 per page)
+
+### Availability
+- **NewsBlur**: Virtual feeds appear at the top of the root feed list (requires premium subscription for full access)
+- **CommaFeed**: Virtual feeds appear at the top of both the root feed list and inside each category/folder
+
+### Settings
+- Toggle NewsBlur virtual feeds visibility: **RSS Reader** → **Settings** → **Show NewsBlur 'All Feeds'**
+- Default: Visible (can be disabled if you prefer not to see them)
+- Changes take effect immediately when you reopen the NewsBlur account
+
+**Note**: Virtual feeds cannot be marked as read in bulk. Use individual feeds for "Mark all as read" functionality.
+
 ## Tap Action on Feed Items
 Configure what happens when you tap a story in the feed list:
 - Open **RSS Reader** → **Settings** → **Tap action on feed items**
