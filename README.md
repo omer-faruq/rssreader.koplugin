@@ -26,7 +26,7 @@ The other Lua files handle internal logic. End users do not need to open or modi
 ## Quick Start
 - Open **RSS Reader** from KOReader’s main menu ("Search" part).
 - The account list reflects the entries you configured; tap to open, long-press for more options.
-- In the feed list, a long press lets you open the original website, save the article, or toggle read/unread.
+- In the feed list, a tap performs the action you configured (see "Tap Action on Feed Items" below), while a long press always shows all options: preview, open directly, save, and toggle read/unread.
 - For local accounts, the groups and feeds defined in your renamed `rssreader_local_defaults.lua` appear. Editing the URLs here is how you add new sources.
 
 ## Tap Action on Feed Items
