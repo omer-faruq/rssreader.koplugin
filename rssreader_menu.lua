@@ -32,6 +32,7 @@ local DiffbotSanitizer = require("sanitizers/rssreader_sanitizer_diffbot")
 local InstaparserSanitizer = require("sanitizers/rssreader_sanitizer_instaparser")
 local InputDialog = require("ui/widget/inputdialog")
 local OPMLHandler = require("rssreader_opml")
+local QRMessage = require("ui/widget/qrmessage")
 
 local function getStartOfTodayTimestamp()
     local now_t = os.date("*t")
@@ -1455,6 +1456,8 @@ function MenuBuilder:createStoryLongPressMenu(stories, index, context, open_call
         end
     end
 
+    local story_link = story.permalink or story.href or story.link
+
     local buttons = {{
         {
             text = _("Preview"),
@@ -1500,6 +1503,19 @@ function MenuBuilder:createStoryLongPressMenu(stories, index, context, open_call
             callback = function()
                 closeDialog()
                 self:handleStoryAction(stories, index, mark_action, story, context)
+            end,
+        },
+        {
+            text = _("Show QR Code"),
+            enabled = story_link ~= nil,
+            callback = function()
+                closeDialog()
+                local qr_size = math.min(Screen:getWidth(), Screen:getHeight()) * 0.6
+                UIManager:show(QRMessage:new{
+                    text = story_link,
+                    width = qr_size,
+                    height = qr_size,
+                })
             end,
         },
         {
