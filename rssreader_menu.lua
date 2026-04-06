@@ -243,7 +243,7 @@ local function decoratedStoryTitle(story, decorate)
         title = string.format("%s • %s", _("NEW"), title)
     end
 
-    if story.feed_title and story.feed_title ~= "" then
+    if story._from_virtual_feed and story.feed_title and story.feed_title ~= "" then
         local feed_prefix = story.feed_title
         if #feed_prefix > 5 then
             feed_prefix = feed_prefix:sub(1, 5)
@@ -1530,8 +1530,13 @@ function MenuBuilder:createStoryLongPressMenu(stories, index, context, open_call
         },
     })
 
+    local menu_title = story.story_title or story.title or _("Story")
+    if story._from_virtual_feed and story.feed_title and story.feed_title ~= "" then
+        menu_title = string.format("%s\n[%s]", menu_title, story.feed_title)
+    end
+    
     dialog = ButtonDialog:new{
-        title = story.story_title or story.title or _("Story"),
+        title = menu_title,
         buttons = buttons,
     }
 

@@ -441,7 +441,9 @@ function CommaFeed:fetchStories(feed_id, options)
 
         local stories = {}
         for _, entry in ipairs(data_or_err.entries or {}) do
-            table.insert(stories, normalizeEntry(entry))
+            local story = normalizeEntry(entry)
+            story._from_virtual_feed = true
+            table.insert(stories, story)
         end
 
         local has_more = data_or_err.hasMore == true

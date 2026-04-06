@@ -494,7 +494,9 @@ function NewsBlur:fetchStories(feed_id, options)
 
         if type(data_or_err.stories) == "table" then
             for _, entry in ipairs(data_or_err.stories) do
-                table.insert(result.stories, normalizeStory(entry))
+                local story = normalizeStory(entry)
+                story._from_virtual_feed = true
+                table.insert(result.stories, story)
             end
         end
 
