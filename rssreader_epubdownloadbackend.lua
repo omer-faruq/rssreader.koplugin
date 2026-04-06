@@ -6,6 +6,7 @@ local http = require("socket.http")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
 local ltn12 = require("ltn12")
+local qrencode = require("ffi/qrencode")
 local socket = require("socket")
 local socket_url = require("socket.url")
 local socketutil = require("socketutil")
@@ -28,6 +29,74 @@ local FeedCache = CacheSQLite:new{
     db_path = DataStorage:getDataDir() .. "/cache/rssreader_epub.sqlite",
     size = 1024 * 1024 * 10, -- 10MB
 }
+
+local function generateQRCodeSVG(url, size)
+    size = size or 150
+    local ok, grid = qrencode.qrcode(url)
+    if not ok or not grid then
+        logger.warn("Failed to generate QR code for:", url)
+        return nil
+    end
+    
+    local grid_size = #grid
+    local sq_size = math.floor(size / grid_size)
+    local actual_size = sq_size * grid_size
+    
+    local svg_parts = {
+        string.format('<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">', 
+            actual_size, actual_size, actual_size, actual_size),
+        string.format('<rect width="%d" height="%d" fill="white"/>', actual_size, actual_size)
+    }
+    
+    for x, col in ipairs(grid) do
+        for y, lgn in ipairs(col) do
+            if lgn > 0 then
+                table.insert(svg_parts, string.format(
+                    '<rect x="%d" y="%d" width="%d" height="%d" fill="black"/>',
+                    (x - 1) * sq_size, (y - 1) * sq_size, sq_size, sq_size
+                ))
+            end
+        end
+    end
+    
+    table.insert(svg_parts, '</svg>')
+    return table.concat(svg_parts)
+end
+
+local function appendURLFooter(html, url)
+    if type(html) ~= "string" or html == "" or type(url) ~= "string" or url == "" then
+        return html
+    end
+    
+    local qr_svg = generateQRCodeSVG(url, 150)
+    if not qr_svg then
+        logger.info("QR code generation failed, adding URL only")
+        qr_svg = ""
+    end
+    
+    local footer_parts = {
+        '<div style="margin-top: 2em; padding-top: 1em; border-top: 2px solid #ccc;">',
+        '<p style="font-size: 0.9em; color: #666; margin: 0.5em 0;">',
+        '<strong>Source:</strong> <a href="' .. url .. '">' .. url .. '</a>',
+        '</p>'
+    }
+    
+    if qr_svg ~= "" then
+        table.insert(footer_parts, '<div style="margin-top: 0.5em;">')
+        table.insert(footer_parts, qr_svg)
+        table.insert(footer_parts, '</div>')
+    end
+    
+    table.insert(footer_parts, '</div>')
+    local footer = table.concat(footer_parts)
+    
+    local body_end_pos = html:lower():find("</body>")
+    if body_end_pos then
+        return html:sub(1, body_end_pos - 1) .. footer .. html:sub(body_end_pos)
+    else
+        return html .. footer
+    end
+end
 
 -- filter HTML using CSS selector
 local function filter(text, element)
@@ -349,6 +418,9 @@ function EpubDownloadBackend:createEpub(epub_path, html, url, include_images, me
     -- should it changes if content is updated (as now, including the wikipedia revisionId),
     -- or should it stays the same even if revid changes (content of the same book updated).
     if filter_enable then html = filter(html, filter_element) end
+    
+    html = appendURLFooter(html, url)
+    
     local images = {}
     local seen_images = {}
     local imagenum = 1

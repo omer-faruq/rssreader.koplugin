@@ -10,6 +10,7 @@ local InfoMessage = require("ui/widget/infomessage")
 local _ = require("gettext")
 local logger = require("logger")
 local lfs = require("libs/libkoreader-lfs")
+local qrencode = require("ffi/qrencode")
 local socket = require("socket")
 local http = require("socket.http")
 local urlmod = require("socket.url")
@@ -46,6 +47,62 @@ local function getStartOfTodayTimestamp()
         isdst = now_t.isdst -- Respect local timezone
     }
     return os.time(start_of_day_t)
+end
+
+local function generateQRCodeSVG(url, size)
+    size = size or 150
+    local ok, grid = qrencode.qrcode(url)
+    if not ok or not grid then
+        logger.warn("Failed to generate QR code for:", url)
+        return nil
+    end
+    
+    local grid_size = #grid
+    local sq_size = math.floor(size / grid_size)
+    local actual_size = sq_size * grid_size
+    
+    local svg_parts = {
+        string.format('<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">', 
+            actual_size, actual_size, actual_size, actual_size),
+        string.format('<rect width="%d" height="%d" fill="white"/>', actual_size, actual_size)
+    }
+    
+    for x, col in ipairs(grid) do
+        for y, lgn in ipairs(col) do
+            if lgn > 0 then
+                table.insert(svg_parts, string.format(
+                    '<rect x="%d" y="%d" width="%d" height="%d" fill="black"/>',
+                    (x - 1) * sq_size, (y - 1) * sq_size, sq_size, sq_size
+                ))
+            end
+        end
+    end
+    
+    table.insert(svg_parts, '</svg>')
+    return table.concat(svg_parts)
+end
+
+local function createURLFooterHTML(url)
+    if type(url) ~= "string" or url == "" then
+        return ""
+    end
+    
+    local qr_svg = generateQRCodeSVG(url, 150)
+    local footer_parts = {
+        '<div style="margin-top: 2em; padding-top: 1em; border-top: 2px solid #ccc;">',
+        '<p style="font-size: 0.9em; color: #666; margin: 0.5em 0;">',
+        '<strong>Source:</strong> <a href="' .. util.htmlEscape(url) .. '">' .. util.htmlEscape(url) .. '</a>',
+        '</p>'
+    }
+    
+    if qr_svg then
+        table.insert(footer_parts, '<div style="margin-top: 0.5em;">')
+        table.insert(footer_parts, qr_svg)
+        table.insert(footer_parts, '</div>')
+    end
+    
+    table.insert(footer_parts, '</div>')
+    return table.concat(footer_parts)
 end
 
 local function loadEpubDownloadBackend()
@@ -527,7 +584,7 @@ local function collectActiveSanitizers(builder)
     return ordered
 end
 
-local function writeStoryHtmlFile(html, filepath, title)
+local function writeStoryHtmlFile(html, filepath, title, url)
     if type(html) == "string" and html ~= "" then
         html = HtmlSanitizer.disableFontSizeDeclarations(html)
     end
@@ -541,6 +598,12 @@ local function writeStoryHtmlFile(html, filepath, title)
     end
     file:write("</head><body>")
     file:write(html or "")
+    
+    local footer = createURLFooterHTML(url)
+    if footer ~= "" then
+        file:write(footer)
+    end
+    
     file:write("</body></html>")
     file:close()
     return true
@@ -900,7 +963,8 @@ local function downloadStoryToCache(story, builder, on_complete)
             return
         end
 
-        if not writeStoryHtmlFile(content, target_path, resolveStoryDocumentTitle(story)) then
+        local story_url = story.permalink or story.href or story.link or ""
+        if not writeStoryHtmlFile(content, target_path, resolveStoryDocumentTitle(story), story_url) then
             if on_complete then
                 on_complete(nil, "write_error")
             end
@@ -1346,7 +1410,8 @@ function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
             end
 
             local target_path = buildUniqueTargetPath(directory, filename)
-            if not writeStoryHtmlFile(content, target_path, resolveStoryDocumentTitle(target_story)) then
+            local story_url_for_html = metadata.original_url or target_story.permalink or target_story.href or target_story.link or ""
+            if not writeStoryHtmlFile(content, target_path, resolveStoryDocumentTitle(target_story), story_url_for_html) then
                 cleanupAssets()
                 UIManager:show(InfoMessage:new{ text = _("Failed to save story."), timeout = 3 })
                 return
