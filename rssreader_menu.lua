@@ -2,6 +2,7 @@ local util = require("util")
 local Menu = require("ui/widget/menu")
 local Button = require("ui/widget/button")
 local ButtonDialog = require("ui/widget/buttondialog")
+local Blitbuffer = require("ffi/blitbuffer")
 local ffiUtil = require("ffi/util")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local Device = require("device")
@@ -208,8 +209,6 @@ local function normalizeStoryReadState(story)
             story[key] = parsed
             if read_state == nil then
                 read_state = parsed
-            elseif should_create_epub and not EpubDownloadBackend then
-                logger.warn("RSSReader", "EPUB backend unavailable; saving as HTML instead")
             end
         end
     end
@@ -1512,6 +1511,7 @@ function MenuBuilder:createLongPressMenuForNode(account, client, node, normal_ca
         buttons = {{
             {
                 text = _("Open"),
+                background = Blitbuffer.COLOR_WHITE,
                 callback = function()
                     UIManager:close(dialog)
                     if type(normal_callback) == "function" then
@@ -1521,6 +1521,7 @@ function MenuBuilder:createLongPressMenuForNode(account, client, node, normal_ca
             },
             {
                 text = _("Mark all as read"),
+                background = Blitbuffer.COLOR_WHITE,
                 callback = function()
                     UIManager:close(dialog)
                     self:performMarkAllAsRead(account, client, node)
@@ -1528,6 +1529,7 @@ function MenuBuilder:createLongPressMenuForNode(account, client, node, normal_ca
             },
             {
                 text = _("Close"),
+                background = Blitbuffer.COLOR_WHITE,
                 callback = function()
                     UIManager:close(dialog)
                 end,
@@ -1567,6 +1569,7 @@ function MenuBuilder:createStoryLongPressMenu(stories, index, context, open_call
     local buttons = {{
         {
             text = _("Preview"),
+            background = Blitbuffer.COLOR_WHITE,
             callback = function()
                 closeDialog()
                 markStoryReadIfNeeded()
@@ -1577,6 +1580,7 @@ function MenuBuilder:createStoryLongPressMenu(stories, index, context, open_call
         },
         {
             text = _("Open"),
+            background = Blitbuffer.COLOR_WHITE,
             callback = function()
                 closeDialog()
                 markStoryReadIfNeeded()
@@ -1585,6 +1589,7 @@ function MenuBuilder:createStoryLongPressMenu(stories, index, context, open_call
         },
         {
             text = _("Save"),
+            background = Blitbuffer.COLOR_WHITE,
             callback = function()
                 closeDialog()
                 markStoryReadIfNeeded()
@@ -1606,6 +1611,7 @@ function MenuBuilder:createStoryLongPressMenu(stories, index, context, open_call
     table.insert(buttons, {
         {
             text = mark_text,
+            background = Blitbuffer.COLOR_WHITE,
             callback = function()
                 closeDialog()
                 self:handleStoryAction(stories, index, mark_action, story, context)
@@ -1613,6 +1619,7 @@ function MenuBuilder:createStoryLongPressMenu(stories, index, context, open_call
         },
         {
             text = _("Show QR Code"),
+            background = Blitbuffer.COLOR_WHITE,
             enabled = story_link ~= nil,
             callback = function()
                 closeDialog()
@@ -1626,6 +1633,7 @@ function MenuBuilder:createStoryLongPressMenu(stories, index, context, open_call
         },
         {
             text = _("Close"),
+            background = Blitbuffer.COLOR_WHITE,
             callback = function()
                 closeDialog()
             end,
@@ -1662,6 +1670,7 @@ function MenuBuilder:createLongPressMenuForLocalFeed(feed, account_name, normal_
         buttons = {{
             {
                 text = _("Open"),
+                background = Blitbuffer.COLOR_WHITE,
                 callback = function()
                     UIManager:close(dialog)
                     if type(normal_callback) == "function" then
@@ -1671,6 +1680,7 @@ function MenuBuilder:createLongPressMenuForLocalFeed(feed, account_name, normal_
             },
             {
                 text = _("Mark all as read"),
+                background = Blitbuffer.COLOR_WHITE,
                 callback = function()
                     UIManager:close(dialog)
                     self:performLocalMarkAllAsRead(feed, account_name)
@@ -1678,6 +1688,7 @@ function MenuBuilder:createLongPressMenuForLocalFeed(feed, account_name, normal_
             },
             {
                 text = _("Close"),
+                background = Blitbuffer.COLOR_WHITE,
                 callback = function()
                     UIManager:close(dialog)
                 end,
@@ -1771,12 +1782,14 @@ function MenuBuilder:showMarkAllAsReadDialogForAccount(account)
         buttons = {{
             {
                 text = _("Cancel"),
+                background = Blitbuffer.COLOR_WHITE,
                 callback = function()
                     UIManager:close(dialog)
                 end,
             },
             {
                 text = _("Mark all as read"),
+                background = Blitbuffer.COLOR_WHITE,
                 callback = function()
                     UIManager:close(dialog)
                     self:performMarkAllAsReadForAccount(account)
@@ -1891,12 +1904,14 @@ function MenuBuilder:showMarkAllAsReadDialog(account, client, node)
         buttons = {{
             {
                 text = _("Cancel"),
+                background = Blitbuffer.COLOR_WHITE,
                 callback = function()
                     UIManager:close(dialog)
                 end,
             },
             {
                 text = _("Mark all as read"),
+                background = Blitbuffer.COLOR_WHITE,
                 callback = function()
                     UIManager:close(dialog)
                     self:performMarkAllAsRead(account, client, node)
@@ -2330,6 +2345,7 @@ function MenuBuilder:buildAccountEntries(accounts, open_callback)
         -- Add account info for all accounts
         table.insert(holds_items, {
             text = _("Account info"),
+            background = Blitbuffer.COLOR_WHITE,
             callback = function()
                 UIManager:show(InfoMessage:new{
                     text = string.format("%s\n(%s)", title, account.type or "unknown"),
@@ -2341,6 +2357,7 @@ function MenuBuilder:buildAccountEntries(accounts, open_callback)
         if account.type == "local" then
             table.insert(holds_items, {
                 text = _("Open"),
+                background = Blitbuffer.COLOR_WHITE,
                 callback = function()
                     if open_callback then
                         open_callback(account)
@@ -2353,6 +2370,7 @@ function MenuBuilder:buildAccountEntries(accounts, open_callback)
         if account.type == "newsblur" or account.type == "commafeed" then
             table.insert(holds_items, {
                 text = _("Mark all as read"),
+                background = Blitbuffer.COLOR_WHITE,
                 callback = function()
                     self:showMarkAllAsReadDialogForAccount(account)
                 end,
@@ -2361,6 +2379,7 @@ function MenuBuilder:buildAccountEntries(accounts, open_callback)
             -- Keep the existing delete feed placeholder for local accounts
             table.insert(holds_items, {
                 text = _("Delete feed (future feature)"),
+                background = Blitbuffer.COLOR_WHITE,
                 keep_menu_open = true,
                 callback = function()
                     -- TODO: Implement feed deletion for local accounts
@@ -2401,6 +2420,7 @@ function MenuBuilder:showSettingsPopup()
         buttons = {
             {{
                 text = _("Tap action on feed items"),
+                background = Blitbuffer.COLOR_WHITE,
                 align = "left",
                 callback = function()
                     UIManager:close(dialog)
@@ -2409,6 +2429,7 @@ function MenuBuilder:showSettingsPopup()
             }},
             {{
                 text = _("List view mode"),
+                background = Blitbuffer.COLOR_WHITE,
                 align = "left",
                 callback = function()
                     UIManager:close(dialog)
@@ -2417,6 +2438,7 @@ function MenuBuilder:showSettingsPopup()
             }},
             {{
                 text = show_newsblur_all and "✓ " .. _("Show NewsBlur 'All Feeds'") or _("Show NewsBlur 'All Feeds'"),
+                background = Blitbuffer.COLOR_WHITE,
                 align = "left",
                 callback = function()
                     UIManager:close(dialog)
@@ -2443,6 +2465,7 @@ function MenuBuilder:showSettingsPopup()
             }},
             {{
                 text = _("Clear cache"),
+                background = Blitbuffer.COLOR_WHITE,
                 align = "left",
                 callback = function()
                     UIManager:close(dialog)
@@ -2451,6 +2474,7 @@ function MenuBuilder:showSettingsPopup()
             }},
             {{
                 text = _("Import from OPML"),
+                background = Blitbuffer.COLOR_WHITE,
                 align = "left",
                 callback = function()
                     UIManager:close(dialog)
@@ -2459,6 +2483,7 @@ function MenuBuilder:showSettingsPopup()
             }},
             {{
                 text = _("Export to OPML"),
+                background = Blitbuffer.COLOR_WHITE,
                 align = "left",
                 callback = function()
                     UIManager:close(dialog)
@@ -2483,6 +2508,7 @@ function MenuBuilder:showTapActionPopup()
         buttons = {
             {{
                 text = current_action == "preview" and "✓ " .. _("Show preview") or _("Show preview"),
+                background = Blitbuffer.COLOR_WHITE,
                 align = "left",
                 callback = function()
                     if reader and type(reader.setTapAction) == "function" then
@@ -2493,6 +2519,7 @@ function MenuBuilder:showTapActionPopup()
             }},
             {{
                 text = current_action == "open" and "✓ " .. _("Open directly") or _("Open directly"),
+                background = Blitbuffer.COLOR_WHITE,
                 align = "left",
                 callback = function()
                     if reader and type(reader.setTapAction) == "function" then
@@ -2503,6 +2530,7 @@ function MenuBuilder:showTapActionPopup()
             }},
             {{
                 text = current_action == "save" and "✓ " .. _("Save only") or _("Save only"),
+                background = Blitbuffer.COLOR_WHITE,
                 align = "left",
                 callback = function()
                     if reader and type(reader.setTapAction) == "function" then
@@ -2536,6 +2564,7 @@ function MenuBuilder:showListViewPopup()
         buttons = {
             {{
                 text = label("compact", _("Title only")),
+                background = Blitbuffer.COLOR_WHITE,
                 align = "left",
                 callback = function()
                     if reader and type(reader.setListViewMode) == "function" then
@@ -2546,6 +2575,7 @@ function MenuBuilder:showListViewPopup()
             }},
             {{
                 text = label("magazine", _("Title and snippet")),
+                background = Blitbuffer.COLOR_WHITE,
                 align = "left",
                 callback = function()
                     if reader and type(reader.setListViewMode) == "function" then
@@ -3030,6 +3060,7 @@ function MenuBuilder:showNewsBlurFeed(account, client, feed_node, opts)
                 local spacer = HorizontalSpan:new{ width = Screen:scaleBySize(16) }
                 local load_more_button = Button:new{
                     text = _("More"),
+                    background = Blitbuffer.COLOR_WHITE,
                     bordersize = 0,
                     show_parent = menu_instance.show_parent or menu_instance,
                     callback = function()
@@ -3322,6 +3353,7 @@ function MenuBuilder:showCommaFeedFeed(account, client, feed_node, opts)
                 local spacer = HorizontalSpan:new{ width = Screen:scaleBySize(16) }
                 local load_more_button = Button:new{
                     text = _("More"),
+                    background = Blitbuffer.COLOR_WHITE,
                     bordersize = 0,
                     show_parent = menu_instance.show_parent or menu_instance,
                     callback = function()
@@ -3698,6 +3730,7 @@ function MenuBuilder:showFreshRSSFeed(account, client, feed_node, opts)
                 local spacer = HorizontalSpan:new{ width = Screen:scaleBySize(16) }
                 local load_more_button = Button:new{
                     text = _("More"),
+                    background = Blitbuffer.COLOR_WHITE,
                     bordersize = 0,
                     show_parent = menu_instance.show_parent or menu_instance,
                     callback = function()

@@ -4,6 +4,7 @@ local UIManager = require("ui/uimanager")
 local Menu = require("ui/widget/menu")
 local InfoMessage = require("ui/widget/infomessage")
 local Button = require("ui/widget/button")
+local Blitbuffer = require("ffi/blitbuffer")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local Device = require("device")
 local _ = require("gettext")
@@ -524,6 +525,7 @@ function RSSReader:updateBackButton(menu_instance)
         if not menu_instance._rss_back_button then
             menu_instance._rss_back_button = Button:new{
                 text = _("Back"),
+                background = Blitbuffer.COLOR_WHITE,
                 bordersize = 0,
                 show_parent = menu_instance.show_parent or menu_instance,
             }
@@ -553,6 +555,7 @@ function RSSReader:updateBackButton(menu_instance)
     if not menu_instance._rss_back_button then
         menu_instance._rss_back_button = Button:new{
             text = _("Back"),
+            background = Blitbuffer.COLOR_WHITE,
             bordersize = 0,
             show_parent = menu_instance.show_parent or menu_instance,
         }

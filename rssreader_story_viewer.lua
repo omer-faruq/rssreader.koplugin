@@ -291,6 +291,7 @@ local function buildToolbarButtons(story, on_action, close_handler, include_clos
         if not disable_mutators and allow_mark_unread then
             table.insert(first_row, {
                 text = keep_unread_label,
+                background = Blitbuffer.COLOR_WHITE,
                 callback = function()
                     on_action("mark_unread", story)
                 end,
@@ -300,6 +301,7 @@ local function buildToolbarButtons(story, on_action, close_handler, include_clos
         if options and options.include_save then
             table.insert(first_row, {
                 text = _("Save"),
+                background = Blitbuffer.COLOR_WHITE,
                 callback = function()
                     on_action("save_story", story)
                 end,
@@ -312,6 +314,7 @@ local function buildToolbarButtons(story, on_action, close_handler, include_clos
         local navigation_row = {
             {
                 text = _("Open"),
+                background = Blitbuffer.COLOR_WHITE,
                 callback = function()
                     on_action("go_to_link", {
                         story = story,
@@ -322,6 +325,7 @@ local function buildToolbarButtons(story, on_action, close_handler, include_clos
             },
             {
                 text = _("Next"),
+                background = Blitbuffer.COLOR_WHITE,
                 callback = function()
                     if close_handler then
                         close_handler()
@@ -336,6 +340,7 @@ local function buildToolbarButtons(story, on_action, close_handler, include_clos
         if not disable_mutators then
             table.insert(navigation_row, {
                 text = _("Next unread"),
+                background = Blitbuffer.COLOR_WHITE,
                 callback = function()
                     if close_handler then
                         close_handler()
@@ -351,6 +356,7 @@ local function buildToolbarButtons(story, on_action, close_handler, include_clos
         table.insert(rows, {
             {
                 text = _("Close"),
+                background = Blitbuffer.COLOR_WHITE,
                 callback = function()
                     if close_handler then
                         close_handler()
