@@ -469,6 +469,14 @@ function RSSReader:setTapAction(action)
     G_reader_settings:saveSetting("rssreader_tap_action", action)
 end
 
+function RSSReader:getListViewMode()
+    return G_reader_settings:readSetting("rssreader_list_view_mode", "compact")
+end
+
+function RSSReader:setListViewMode(mode)
+    G_reader_settings:saveSetting("rssreader_list_view_mode", mode)
+end
+
 function RSSReader:onDispatcherRegisterActions()
     Dispatcher:registerAction("rssreader_open", {
         category = "none",

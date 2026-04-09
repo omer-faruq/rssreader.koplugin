@@ -124,7 +124,7 @@ local function normalizeEntry(entry)
     local content = entry.content or entry.summary or entry.description
     story.content = content
     story.story_content = content
-    local timestamp = entry.insertedDate or entry.date or entry.timestamp
+    local timestamp = entry.date or entry.insertedDate or entry.timestamp
     story.created_on_time = timestamp
     story.timestamp = timestamp
     local read_flag = entry.read == true

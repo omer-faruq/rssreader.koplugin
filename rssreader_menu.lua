@@ -315,6 +315,39 @@ local function decoratedStoryTitle(story, decorate)
     return title
 end
 
+local MAGAZINE_SNIPPET_LENGTH = 400
+
+local function storySnippet(story, max_chars)
+    max_chars = max_chars or MAGAZINE_SNIPPET_LENGTH
+    local raw_html = story.story_content or story.content or story.summary
+    if type(raw_html) ~= "string" or raw_html == "" then
+        return nil
+    end
+    local plain = util.htmlToPlainText(raw_html)
+    if not plain or plain == "" then
+        return nil
+    end
+    plain = plain:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+    if plain == "" then
+        return nil
+    end
+    if #plain > max_chars then
+        plain = plain:sub(1, max_chars) .. "…"
+    end
+    return replaceRightSingleQuoteEntities(plain)
+end
+
+local function buildStoryEntryText(story, decorate, view_mode)
+    local title = decoratedStoryTitle(story, decorate)
+    if view_mode == "magazine" or view_mode == "cards" then
+        local snippet = storySnippet(story)
+        if snippet then
+            return title .. "\n  •  " .. snippet
+        end
+    end
+    return title
+end
+
 local function resolveStoryFeedId(context, story)
     if context and context.feed_id then
         return context.feed_id
@@ -1164,7 +1197,11 @@ function MenuBuilder:_updateStoryEntry(context, stories, index)
     if not entry then
         return
     end
-    entry.text = decoratedStoryTitle(story, true)
+    local view_mode = "compact"
+    if self.reader and type(self.reader.getListViewMode) == "function" then
+        view_mode = self.reader:getListViewMode()
+    end
+    entry.text = buildStoryEntryText(story, true, view_mode)
     entry.bold = isUnread(story)
     if type(menu_instance.updateItems) == "function" then
         menu_instance:updateItems(nil, true)
@@ -1598,6 +1635,11 @@ function MenuBuilder:createStoryLongPressMenu(stories, index, context, open_call
     local menu_title = story.story_title or story.title or _("Story")
     if story._from_virtual_feed and story.feed_title and story.feed_title ~= "" then
         menu_title = string.format("%s\n[%s]", menu_title, story.feed_title)
+    end
+    
+    local snippet = storySnippet(story, 500)
+    if snippet then
+        menu_title = menu_title .. "\n" .. string.rep("─", 20) .. "\n" .. snippet
     end
     
     dialog = ButtonDialog:new{
@@ -2162,6 +2204,11 @@ function MenuBuilder:showLocalFeed(feed, opts)
             force_refresh_on_close = false,
         }
 
+        local view_mode = "compact"
+        if self.reader and type(self.reader.getListViewMode) == "function" then
+            view_mode = self.reader:getListViewMode()
+        end
+
         local entries = {}
         applyLocalReadState()
         for index, story in ipairs(stories) do
@@ -2169,7 +2216,7 @@ function MenuBuilder:showLocalFeed(feed, opts)
             normalizeStoryLink(story)
             local entry_is_unread = isUnread(story)
             table.insert(entries, {
-                text = decoratedStoryTitle(story, true),
+                text = buildStoryEntryText(story, true, view_mode),
                 bold = entry_is_unread,
                 callback = self:createTapCallback(stories, index, context),
                 hold_callback = function()
@@ -2199,6 +2246,7 @@ function MenuBuilder:showLocalFeed(feed, opts)
                 title = feed_node.title or _("Feed"),
                 item_table = entries,
                 multilines_forced = true,
+                items_max_lines = view_mode == "magazine" and 5 or nil,
             }
             menu_instance._rss_feed_node = feed_node
             menu_instance.onMenuHold = triggerHoldCallback
@@ -2360,6 +2408,14 @@ function MenuBuilder:showSettingsPopup()
                 end,
             }},
             {{
+                text = _("List view mode"),
+                align = "left",
+                callback = function()
+                    UIManager:close(dialog)
+                    self:showListViewPopup()
+                end,
+            }},
+            {{
                 text = show_newsblur_all and "✓ " .. _("Show NewsBlur 'All Feeds'") or _("Show NewsBlur 'All Feeds'"),
                 align = "left",
                 callback = function()
@@ -2460,8 +2516,50 @@ function MenuBuilder:showTapActionPopup()
     UIManager:show(dialog)
 end
 
+function MenuBuilder:showListViewPopup()
+    local reader = self.reader
+    local current_mode = "compact"
+    if reader and type(reader.getListViewMode) == "function" then
+        current_mode = reader:getListViewMode()
+    end
+
+    local function label(mode_key, display)
+        if current_mode == mode_key then
+            return "✓ " .. display
+        end
+        return display
+    end
+
+    local dialog
+    dialog = ButtonDialog:new{
+        title = _("List view mode"),
+        buttons = {
+            {{
+                text = label("compact", _("Title only")),
+                align = "left",
+                callback = function()
+                    if reader and type(reader.setListViewMode) == "function" then
+                        reader:setListViewMode("compact")
+                    end
+                    UIManager:close(dialog)
+                end,
+            }},
+            {{
+                text = label("magazine", _("Title and snippet")),
+                align = "left",
+                callback = function()
+                    if reader and type(reader.setListViewMode) == "function" then
+                        reader:setListViewMode("magazine")
+                    end
+                    UIManager:close(dialog)
+                end,
+            }},
+        },
+    }
+    UIManager:show(dialog)
+end
+
 function MenuBuilder:showOPMLImport()
-    -- Find OPML files in plugin directory
     local files = OPMLHandler.findOPMLFiles()
     if #files == 0 then
         UIManager:show(InfoMessage:new{
@@ -2471,10 +2569,8 @@ function MenuBuilder:showOPMLImport()
     end
 
     if #files == 1 then
-        -- Only one file, use it directly
         self:showOPMLImportNameDialog(files[1].path, files[1].name)
     else
-        -- Multiple files, let user pick
         local entries = {}
         for _, file in ipairs(files) do
             table.insert(entries, {
@@ -2610,8 +2706,8 @@ function MenuBuilder:showLocalAccount(account)
     local feeds = {}
     local account_name = (account and account.name) or "local"
     if account and account.name then
-        groups = self.local_store:listGroups(account.name)
-        feeds = self.local_store:listFeeds(account.name)
+        groups = self.local_store:listGroups(account_name)
+        feeds = self.local_store:listFeeds(account_name)
     else
         logger.warn("RSSReader", "Account or account.name is nil")
     end
@@ -2856,12 +2952,17 @@ function MenuBuilder:showNewsBlurFeed(account, client, feed_node, opts)
             force_refresh_on_close = false,
         }
 
+        local view_mode = "compact"
+        if self.reader and type(self.reader.getListViewMode) == "function" then
+            view_mode = self.reader:getListViewMode()
+        end
+
         local entries = {}
         for index, story in ipairs(stories) do
             normalizeStoryReadState(story)
             normalizeStoryLink(story)
             table.insert(entries, {
-                text = decoratedStoryTitle(story, true),
+                text = buildStoryEntryText(story, true, view_mode),
                 bold = isUnread(story),
                 callback = self:createTapCallback(stories, index, context),
                 hold_callback = function()
@@ -2891,6 +2992,7 @@ function MenuBuilder:showNewsBlurFeed(account, client, feed_node, opts)
                 title = feed_node.title or (account and account.name) or _("NewsBlur"),
                 item_table = entries,
                 multilines_forced = true,
+                items_max_lines = view_mode == "magazine" and 5 or nil,
             }
             menu_instance._rss_feed_node = feed_node
             menu_instance.onMenuHold = triggerHoldCallback
@@ -2994,11 +3096,6 @@ function MenuBuilder:showNewsBlurFeed(account, client, feed_node, opts)
         return
     end
 
-    if reuse_cached_stories and feed_node._rss_stories and #feed_node._rss_stories > 0 then
-        finalizeMenu()
-        return
-    end
-
     finalizeMenu()
 end
 
@@ -3070,13 +3167,6 @@ function MenuBuilder:showCommaFeedNode(account, client, node)
                 hold_keep_menu_open = true,
             })
         end
-    end
-
-    local function menu_hold_handler(_, item)
-        if item and type(item.hold_callback) == "function" then
-            item.hold_callback()
-        end
-        return true
     end
 
     if #entries == 0 then
@@ -3155,11 +3245,16 @@ function MenuBuilder:showCommaFeedFeed(account, client, feed_node, opts)
             force_refresh_on_close = false,
         }
 
+        local view_mode = "compact"
+        if self.reader and type(self.reader.getListViewMode) == "function" then
+            view_mode = self.reader:getListViewMode()
+        end
+
         local entries = {}
         for index, story in ipairs(stories) do
             normalizeStoryLink(story)
             table.insert(entries, {
-                text = decoratedStoryTitle(story, true),
+                text = buildStoryEntryText(story, true, view_mode),
                 bold = isUnread(story),
                 callback = self:createTapCallback(stories, index, context),
                 hold_callback = function()
@@ -3189,6 +3284,7 @@ function MenuBuilder:showCommaFeedFeed(account, client, feed_node, opts)
                 title = feed_node.title or (account and account.name) or _("CommaFeed"),
                 item_table = entries,
                 multilines_forced = true,
+                items_max_lines = view_mode == "magazine" and 5 or nil,
             }
             menu_instance._rss_feed_node = feed_node
             menu_instance.onMenuHold = triggerHoldCallback
@@ -3526,11 +3622,16 @@ function MenuBuilder:showFreshRSSFeed(account, client, feed_node, opts)
             force_refresh_on_close = false,
         }
 
+        local view_mode = "compact"
+        if self.reader and type(self.reader.getListViewMode) == "function" then
+            view_mode = self.reader:getListViewMode()
+        end
+
         local entries = {}
         for index, story in ipairs(stories) do
             normalizeStoryLink(story)
             table.insert(entries, {
-                text = decoratedStoryTitle(story, true),
+                text = buildStoryEntryText(story, true, view_mode),
                 bold = isUnread(story),
                 callback = self:createTapCallback(stories, index, context),
                 hold_callback = function()
@@ -3560,6 +3661,7 @@ function MenuBuilder:showFreshRSSFeed(account, client, feed_node, opts)
                 title = feed_node.title or (account and account.name) or _("FreshRSS"),
                 item_table = entries,
                 multilines_forced = true,
+                items_max_lines = view_mode == "magazine" and 5 or nil,
             }
             menu_instance._rss_feed_node = feed_node
             menu_instance.onMenuHold = triggerHoldCallback
