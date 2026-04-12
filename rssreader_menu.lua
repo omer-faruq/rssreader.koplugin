@@ -299,7 +299,7 @@ local function decoratedStoryTitle(story, decorate)
         title = string.format("%s • %s", _("NEW"), title)
     end
 
-    if story._from_virtual_feed and story.feed_title and story.feed_title ~= "" then
+    if (story._from_virtual_feed or story._is_from_virtual_feed) and story.feed_title and story.feed_title ~= "" then
         local feed_prefix = story.feed_title
         if #feed_prefix > 5 then
             feed_prefix = feed_prefix:sub(1, 5)
@@ -1641,7 +1641,7 @@ function MenuBuilder:createStoryLongPressMenu(stories, index, context, open_call
     })
 
     local menu_title = story.story_title or story.title or _("Story")
-    if story._from_virtual_feed and story.feed_title and story.feed_title ~= "" then
+    if (story._from_virtual_feed or story._is_from_virtual_feed) and story.feed_title and story.feed_title ~= "" then
         menu_title = string.format("%s\n[%s]", menu_title, story.feed_title)
     end
     
@@ -2716,13 +2716,16 @@ function MenuBuilder:openAccount(reader, account)
         self:showLocalAccount(account)
         return
     elseif account_type == "newsblur" then
-        self:showNewsBlurAccount(account)
+        self:showNewsBlurAccount(account, { force_refresh = true })
         return
     elseif account_type == "commafeed" then
-        self:showCommaFeedAccount(account)
+        self:showCommaFeedAccount(account, { force_refresh = true })
         return
     elseif account_type == "freshrss" then
-        self:showFreshRSSAccount(account)
+        self:showFreshRSSAccount(account, { force_refresh = true })
+        return
+    elseif account_type == "fever" then
+        self:showFeverAccount(account, { force_refresh = true })
         return
     end
 
@@ -3804,6 +3807,277 @@ function MenuBuilder:showFreshRSSFeed(account, client, feed_node, opts)
     end
 
     finalizeMenu()
+end
+
+function MenuBuilder:showFeverAccount(account, opts)
+    opts = opts or {}
+    if not self.accounts or type(self.accounts.getFeverClient) ~= "function" then
+        UIManager:show(InfoMessage:new{
+            text = _("Fever API integration is not available."),
+        })
+        return
+    end
+
+    local client, err = self.accounts:getFeverClient(account)
+    if not client then
+        UIManager:show(InfoMessage:new{
+            text = err or _("Unable to open Fever API account."),
+        })
+        return
+    end
+
+    if not opts.force_refresh and client.tree_cache then
+        self:showFeverNode(account, client, client.tree_cache)
+        return
+    end
+
+    NetworkMgr:runWhenOnline(function()
+        local ok, tree_or_err = client:buildTree()
+        if not ok then
+            UIManager:show(InfoMessage:new{
+                text = tree_or_err or _("Failed to load Fever API subscriptions."),
+            })
+            return
+        end
+
+        local virtual_feeds = {
+            {
+                kind = "feed",
+                id = "fever_all_feeds",
+                title = "★ " .. _("All Feeds"),
+                is_virtual = true,
+                virtual_type = "all",
+                feed = { unreadCount = 0 },
+            },
+            {
+                kind = "feed",
+                id = "fever_all_unread",
+                title = "★ " .. _("All Unread"),
+                is_virtual = true,
+                virtual_type = "unread",
+                feed = { unreadCount = 0 },
+            },
+        }
+
+        local enhanced_tree = {
+            kind = "root",
+            title = tree_or_err.title,
+            children = {},
+        }
+
+        for _, vf in ipairs(virtual_feeds) do
+            table.insert(enhanced_tree.children, vf)
+        end
+
+        for _, child in ipairs(tree_or_err.children or {}) do
+            table.insert(enhanced_tree.children, child)
+        end
+
+        client.tree_cache = enhanced_tree
+
+        self:showFeverNode(account, client, enhanced_tree)
+    end)
+end
+
+function MenuBuilder:showFeverNode(account, client, node)
+    local children = node and node.children or {}
+    local entries = {}
+    
+    for _, child in ipairs(children) do
+        if child.kind == "folder" then
+            local normal_callback = function()
+                self:showFeverNode(account, client, child)
+            end
+            table.insert(entries, {
+                text = child.title or _("Untitled folder"),
+                callback = normal_callback,
+            })
+        elseif child.kind == "feed" then
+            local normal_callback = function()
+                self:showFeverFeed(account, client, child)
+            end
+            local unread_count = child.feed.unreadCount or 0
+            local display_title = child.title or _("Untitled feed")
+            if unread_count > 0 then
+                display_title = display_title .. " (" .. tostring(unread_count) .. ")"
+            end
+            table.insert(entries, {
+                text = display_title,
+                callback = normal_callback,
+                hold_callback = function()
+                    self:createLongPressMenuForNode(account, client, child, normal_callback)
+                end,
+                hold_keep_menu_open = true,
+            })
+        end
+    end
+
+    if #entries == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("No feeds available."),
+        })
+        return
+    end
+
+    local menu_instance = Menu:new{
+        title = node and node.title or (account and account.name) or _("Fever API"),
+        item_table = entries,
+        onMenuHold = triggerHoldCallback,
+    }
+    self:showMenu(menu_instance, function()
+        self:showFeverNode(account, client, node)
+    end)
+
+    if menu_instance then
+        menu_instance.onMenuHold = triggerHoldCallback
+    end
+end
+
+function MenuBuilder:showFeverFeed(account, client, feed_node, opts)
+    opts = opts or {}
+    local reuse_cached_stories = opts.reuse and true or false
+    feed_node._rss_stories = feed_node._rss_stories or {}
+    feed_node._rss_story_keys = feed_node._rss_story_keys or {}
+    feed_node._rss_page = feed_node._rss_page or 0
+    feed_node._account_name = account.name
+    feed_node._rss_reader = self.reader
+
+    if self.reader and type(self.reader.getFeedState) == "function" then
+        local stored_state = self.reader:getFeedState(account.name, feed_node.id)
+        if stored_state then
+            if type(stored_state.stories) == "table" and #stored_state.stories > 0 then
+                feed_node._rss_stories = util.tableDeepCopy(stored_state.stories)
+                feed_node._rss_story_keys = util.tableDeepCopy(stored_state.story_keys or {})
+                feed_node._rss_page = stored_state.current_page or feed_node._rss_page
+                feed_node._rss_has_more = stored_state.has_more or feed_node._rss_has_more
+            end
+            if type(stored_state.menu_page) == "number" then
+                feed_node._rss_menu_page = feed_node._rss_menu_page or stored_state.menu_page
+                if not opts.menu_page then
+                    opts.menu_page = stored_state.menu_page
+                end
+            end
+        end
+    end
+
+    local function finalizeMenu()
+        local stories = feed_node._rss_stories or {}
+        if #stories == 0 then
+            UIManager:show(InfoMessage:new{
+                text = _("No stories available."),
+            })
+            return
+        end
+
+        local context = {
+            feed_type = "fever",
+            account = account,
+            client = client,
+            feed_node = feed_node,
+            feed_id = feed_node.id,
+            refresh = function()
+                self:showFeverFeed(account, client, feed_node, { reuse = true })
+            end,
+            force_refresh_on_close = false,
+        }
+
+        local view_mode = "compact"
+        if self.reader and type(self.reader.getListViewMode) == "function" then
+            view_mode = self.reader:getListViewMode()
+        end
+
+        local entries = {}
+        for index, story in ipairs(stories) do
+            normalizeStoryLink(story)
+            table.insert(entries, {
+                text = buildStoryEntryText(story, true, view_mode),
+                bold = isUnread(story),
+                callback = self:createTapCallback(stories, index, context),
+                hold_callback = function()
+                    self:createStoryLongPressMenu(stories, index, context, function()
+                        self:showStory(stories, index, function(action, payload)
+                            self:handleStoryAction(stories, index, action, payload, context)
+                        end, nil, nil, context)
+                    end)
+                end,
+                hold_keep_menu_open = true,
+            })
+        end
+
+        local current_menu = self.reader and self.reader.current_menu_info and self.reader.current_menu_info.menu
+        local menu_instance
+        if current_menu and current_menu._rss_feed_node == feed_node then
+            menu_instance = current_menu
+            if menu_instance.setTitle then
+                menu_instance:setTitle(feed_node.title or (account and account.name) or _("Fever API"))
+            end
+            if menu_instance.switchItemTable then
+                menu_instance:switchItemTable(nil, entries)
+            end
+            menu_instance.onMenuHold = triggerHoldCallback
+        else
+            menu_instance = Menu:new{
+                title = feed_node.title or (account and account.name) or _("Fever API"),
+                item_table = entries,
+                multilines_forced = true,
+                items_max_lines = view_mode == "magazine" and 5 or nil,
+            }
+            menu_instance._rss_feed_node = feed_node
+            menu_instance.onMenuHold = triggerHoldCallback
+            ensureMenuCloseHook(menu_instance)
+            trackMenuPage(menu_instance, feed_node)
+            self:showMenu(menu_instance, function()
+                self:showFeverFeed(account, client, feed_node, { reuse = true })
+            end)
+        end
+
+        if menu_instance then
+            context.menu_instance = menu_instance
+            menu_instance._rss_feed_node = feed_node
+            menu_instance.onMenuHold = triggerHoldCallback
+            ensureMenuCloseHook(menu_instance)
+            trackMenuPage(menu_instance, feed_node)
+        end
+    end
+
+    if reuse_cached_stories and #feed_node._rss_stories > 0 then
+        finalizeMenu()
+        return
+    end
+
+    NetworkMgr:runWhenOnline(function()
+        local fetch_options = {}
+        
+        if feed_node.is_virtual then
+            if feed_node.virtual_type == "unread" then
+                fetch_options.read_filter = "unread_only"
+            end
+        else
+            fetch_options.read_filter = "unread_only"
+        end
+        
+        local ok, data = client:fetchStories(feed_node.id, fetch_options)
+        if not ok then
+            UIManager:show(InfoMessage:new{
+                text = data or _("Failed to fetch stories."),
+            })
+            return
+        end
+
+        local stories = data.stories or {}
+        feed_node._rss_stories = stories
+        feed_node._rss_story_keys = {}
+        for _, story in ipairs(stories) do
+            local key = story.story_hash or story.hash or story.guid or story.story_id or story.id
+            if key then
+                feed_node._rss_story_keys[key] = true
+            end
+        end
+        feed_node._rss_page = 1
+        feed_node._rss_has_more = data.more_stories or false
+
+        finalizeMenu()
+    end)
 end
 
 return MenuBuilder

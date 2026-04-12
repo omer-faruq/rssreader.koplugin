@@ -19,6 +19,20 @@ return {
                 password = "password",
             },
         },
+        {
+            name = "Fever API",
+            type = "fever",
+            active = false,
+            auth = {
+                base_url = "https://example.com/fever",
+                username = "your_username", --use either username+password or api_key
+                password = "your_password",
+                -- api_key = "your_direct_api_key", --use either username+password or api_key
+            },
+            options = {
+                default_folder = nil,
+            },
+        },
         {  
             name = "My FreshRSS",  
             type = "freshrss",  

@@ -23,6 +23,7 @@ function Accounts:new()
         newsblur_clients = {},
         commafeed_clients = {},
         freshrss_clients = {},
+        fever_clients = {},
     }
     setmetatable(instance, self)
     return instance
@@ -91,6 +92,23 @@ function Accounts:getFreshRSSClient(account)
     local FreshRSS = require("rssreader_freshrss")
     local client = FreshRSS:new(account)
     self.freshrss_clients[account.name] = client
+    return client
+end
+
+function Accounts:getFeverClient(account)
+    if not account or account.type ~= "fever" then
+        return nil, "Account is not a Fever API account"
+    end
+    if not account.name then
+        return nil, "Fever account is missing a name"
+    end
+    if self.fever_clients[account.name] then
+        return self.fever_clients[account.name]
+    end
+
+    local Fever = require("rssreader_fever")
+    local client = Fever:new(account)
+    self.fever_clients[account.name] = client
     return client
 end
 

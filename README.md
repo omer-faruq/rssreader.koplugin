@@ -10,9 +10,28 @@ https://github.com/user-attachments/assets/9fa52ff9-2e5a-47f1-a207-db5e2cd80d7e
 
 These scenarios require you to know only two files. Both are provided as `.sample.lua` templates; rename them after editing so the plugin can load them.
 
+## Supported Account Types
+
+The plugin supports several account types:
+- **Local**: Offline RSS feeds stored locally
+- **NewsBlur**: Online RSS aggregator (requires premium subscription for full access)
+- **CommaFeed**: Self-hosted or cloud-based RSS aggregator (**Recommended**)
+- **FreshRSS**: Self-hosted RSS aggregator
+- **Fever API**: Generic API compatible with Miniflux, self-hosted CommaFeed, and other services
+
+### Why CommaFeed is Recommended
+CommaFeed offers the most comprehensive feature set for RSS reading on KOReader:
+- ✅ **Online sync** – Access your feeds from any device with automatic read state synchronization
+- ✅ **Virtual aggregated views** – View all feeds or all unread items from all subscriptions in one list
+- ✅ **Category-level aggregation** – Each folder/category has its own "All Feeds" and "All Unread" views
+- ✅ **Free tier available** – Use the official hosted service at [commafeed.com](https://www.commafeed.com) or self-host
+- ✅ **Full API support** – Mark as read, pagination, and all core features work seamlessly
+
+Other services like NewsBlur and FreshRSS are fully supported, but may lack category-level virtual feeds or require premium subscriptions.
+
 ## Files You Need to Edit
 - **`rssreader_configuration.sample.lua` → rename to `rssreader_configuration.lua`**: Describe your accounts and per-account preferences.
-  - Provide the name, service type (`local`, `newsblur`, `commafeed`), login details, and options.
+  - Provide the name, service type (`local`, `newsblur`, `commafeed`, `freshrss`, `fever`), login details, and options.
   - Add as many entries as you like, even multiple accounts for the same service type.
   - Use the `active` field to temporarily disable or re-enable an account.
   - After editing, reload the plugin inside KOReader to see your changes in the account list.
@@ -30,15 +49,17 @@ The other Lua files handle internal logic. End users do not need to open or modi
 - For local accounts, the groups and feeds defined in your renamed `rssreader_local_defaults.lua` appear. Editing the URLs here is how you add new sources.
 
 ## Virtual "All Feeds" Aggregated Views
-NewsBlur and CommaFeed accounts now include special virtual feeds that aggregate stories from all your subscriptions:
+NewsBlur, CommaFeed, and Fever API accounts include special virtual feeds that aggregate stories from all your subscriptions:
 - **★ All Feeds** – View all stories from all subscribed feeds in a single chronological list
 - **★ All Unread** – View only unread stories from all feeds combined
 - Stories are prefixed with their feed name (max 5 characters) for easy identification
+- Long-press any story to see the full feed name in the context menu
 - Pagination support: Use the "More" button to load additional stories (50 per page)
 
-### Availability
+### Availability by Service
 - **NewsBlur**: Virtual feeds appear at the top of the root feed list (requires premium subscription for full access)
 - **CommaFeed**: Virtual feeds appear at the top of both the root feed list and inside each category/folder
+- **Fever API**: Virtual feeds appear only at the root level (category-level virtual feeds not supported due to API limitations)
 
 ### Settings
 - Toggle NewsBlur virtual feeds visibility: **RSS Reader** → **Settings** → **Show NewsBlur 'All Feeds'**
