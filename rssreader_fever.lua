@@ -292,6 +292,23 @@ function Fever:buildTreeFromData(groups_data, feeds_data, feeds_groups_data)
         end
     end)
 
+    table.insert(root_children, 1, {
+        kind = "feed",
+        id = "fever_all_unread",
+        title = "★ All Unread",
+        is_virtual = true,
+        virtual_type = "unread",
+        feed = { unreadCount = 0 },
+    })
+    table.insert(root_children, 1, {
+        kind = "feed",
+        id = "fever_all_feeds",
+        title = "★ All Feeds",
+        is_virtual = true,
+        virtual_type = "all",
+        feed = { unreadCount = 0 },
+    })
+
     local tree = {
         kind = "root",
         title = self.account.name or "Fever API",

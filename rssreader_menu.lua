@@ -1121,7 +1121,7 @@ function MenuBuilder:showStory(stories, index, on_action, on_close, options, con
         end
     end
     local is_api_context = false
-    if context and (context.feed_type == "newsblur" or context.feed_type == "commafeed") then
+    if context and (context.feed_type == "newsblur" or context.feed_type == "commafeed" or context.feed_type == "freshrss" or context.feed_type == "fever" or context.feed_type == "miniflux") then
         is_api_context = true
     end
 
@@ -1472,7 +1472,8 @@ function MenuBuilder:collectFeedIdsForNode(node)
 
     local function collectFromNode(current_node)
         if current_node.kind == "feed" then
-            if current_node.id then
+            -- Skip virtual feeds (CommaFeed, Fever, etc.)
+            if current_node.id and not current_node._virtual and not current_node.is_virtual then
                 table.insert(feed_ids, current_node.id)
             end
         elseif current_node.kind == "folder" or current_node.kind == "root" then
@@ -1485,6 +1486,135 @@ function MenuBuilder:collectFeedIdsForNode(node)
     end
 
     collectFromNode(node)
+    return feed_ids
+end
+
+function MenuBuilder:collectFeedsForCommaFeedVirtual(client, virtual_node)
+    local feed_ids = {}
+    if not virtual_node or not virtual_node._virtual then
+        return feed_ids
+    end
+
+    local ok, tree = client:buildTree()
+    if not ok or not tree then
+        return feed_ids
+    end
+
+    local category_id = virtual_node._category_id
+    
+    local function collectFromNode(node)
+        if node.kind == "feed" and not node._virtual and node.id then
+            table.insert(feed_ids, node.id)
+        elseif (node.kind == "folder" or node.kind == "root") and node.children then
+            for _, child in ipairs(node.children) do
+                collectFromNode(child)
+            end
+        end
+    end
+    
+    if not category_id then
+        -- Account-level virtual feed: collect all feeds recursively from entire tree
+        collectFromNode(tree)
+    else
+        -- Category-level virtual feed: find the category and collect all feeds recursively
+        local function findCategoryById(node, target_id)
+            if node.kind == "folder" and tostring(node.id) == tostring(target_id) then
+                return node
+            end
+            if node.children then
+                for _, child in ipairs(node.children) do
+                    local found = findCategoryById(child, target_id)
+                    if found then
+                        return found
+                    end
+                end
+            end
+            return nil
+        end
+        
+        local category_node = findCategoryById(tree, category_id)
+        if category_node then
+            collectFromNode(category_node)
+        end
+    end
+    
+    return feed_ids
+end
+
+function MenuBuilder:collectFeedsForFeverVirtual(client, virtual_node)
+    local feed_ids = {}
+    if not virtual_node or not virtual_node.is_virtual then
+        return feed_ids
+    end
+
+    local ok, tree = client:buildTree()
+    if not ok or not tree then
+        return feed_ids
+    end
+
+    local function collectAllFeeds(node)
+        if node.kind == "feed" and not node.is_virtual and node.id then
+            table.insert(feed_ids, node.id)
+        elseif node.kind == "folder" or node.kind == "root" then
+            if node.children then
+                for _, child in ipairs(node.children) do
+                    collectAllFeeds(child)
+                end
+            end
+        end
+    end
+
+    collectAllFeeds(tree)
+    return feed_ids
+end
+
+function MenuBuilder:collectFeedsForMinifluxVirtual(client, virtual_node)
+    local feed_ids = {}
+    if not virtual_node or not virtual_node._virtual then
+        return feed_ids
+    end
+
+    local ok, tree = client:buildTree()
+    if not ok or not tree then
+        return feed_ids
+    end
+
+    local category_id = virtual_node._category_id
+    
+    local function collectFromNode(node)
+        if node.kind == "feed" and not node._virtual and node.id then
+            table.insert(feed_ids, node.id)
+        elseif (node.kind == "folder" or node.kind == "root") and node.children then
+            for _, child in ipairs(node.children) do
+                collectFromNode(child)
+            end
+        end
+    end
+    
+    if not category_id then
+        collectFromNode(tree)
+    else
+        local function findCategoryById(node, target_id)
+            if node.kind == "folder" and tostring(node.id) == tostring(target_id) then
+                return node
+            end
+            if node.children then
+                for _, child in ipairs(node.children) do
+                    local found = findCategoryById(child, target_id)
+                    if found then
+                        return found
+                    end
+                end
+            end
+            return nil
+        end
+        
+        local category_node = findCategoryById(tree, category_id)
+        if category_node then
+            collectFromNode(category_node)
+        end
+    end
+    
     return feed_ids
 end
 
@@ -1501,7 +1631,7 @@ function MenuBuilder:createLongPressMenuForNode(account, client, node, normal_ca
     end
 
     local account_type = account and account.type
-    if account_type ~= "newsblur" and account_type ~= "commafeed" then
+    if account_type ~= "newsblur" and account_type ~= "commafeed" and account_type ~= "fever" and account_type ~= "freshrss" and account_type ~= "miniflux" then
         return
     end
 
@@ -1525,6 +1655,93 @@ function MenuBuilder:createLongPressMenuForNode(account, client, node, normal_ca
                 callback = function()
                     UIManager:close(dialog)
                     self:performMarkAllAsRead(account, client, node)
+                end,
+            },
+            {
+                text = _("Close"),
+                background = Blitbuffer.COLOR_WHITE,
+                callback = function()
+                    UIManager:close(dialog)
+                end,
+            },
+        }},
+    }
+
+    UIManager:show(dialog)
+    return dialog
+end
+
+function MenuBuilder:createLongPressMenuForFolder(account, client, node, normal_callback)
+    if not node or node.kind ~= "folder" then
+        return
+    end
+
+    local account_type = account and account.type
+    if account_type ~= "newsblur" and account_type ~= "commafeed" and account_type ~= "fever" and account_type ~= "freshrss" and account_type ~= "miniflux" then
+        return
+    end
+
+    local dialog
+    dialog = ButtonDialog:new{
+        title = node.title or _("Category"),
+        buttons = {{
+            {
+                text = _("Open"),
+                background = Blitbuffer.COLOR_WHITE,
+                callback = function()
+                    UIManager:close(dialog)
+                    if type(normal_callback) == "function" then
+                        normal_callback()
+                    end
+                end,
+            },
+            {
+                text = _("Mark all as read"),
+                background = Blitbuffer.COLOR_WHITE,
+                callback = function()
+                    UIManager:close(dialog)
+                    self:showMarkAllAsReadDialog(account, client, node)
+                end,
+            },
+            {
+                text = _("Close"),
+                background = Blitbuffer.COLOR_WHITE,
+                callback = function()
+                    UIManager:close(dialog)
+                end,
+            },
+        }},
+    }
+
+    UIManager:show(dialog)
+    return dialog
+end
+
+function MenuBuilder:createLongPressMenuForLocalGroup(group, account_name, normal_callback)
+    if not group then
+        return
+    end
+
+    local dialog
+    dialog = ButtonDialog:new{
+        title = group.title or _("Group"),
+        buttons = {{
+            {
+                text = _("Open"),
+                background = Blitbuffer.COLOR_WHITE,
+                callback = function()
+                    UIManager:close(dialog)
+                    if type(normal_callback) == "function" then
+                        normal_callback()
+                    end
+                end,
+            },
+            {
+                text = _("Mark all as read"),
+                background = Blitbuffer.COLOR_WHITE,
+                callback = function()
+                    UIManager:close(dialog)
+                    self:showMarkAllAsReadDialogForLocalGroup(group, account_name)
                 end,
             },
             {
@@ -1772,13 +1989,141 @@ function MenuBuilder:performLocalMarkAllAsRead(feed, account_name)
     end)
 end
 
+function MenuBuilder:performLocalGroupMarkAllAsRead(group, account_name)
+    if not group or not group.feeds then
+        UIManager:show(InfoMessage:new{
+            text = _("Group has no feeds."),
+            timeout = 3,
+        })
+        return
+    end
+
+    local title = group.title or _("Group")
+    UIManager:show(InfoMessage:new{
+        text = string.format(_("Marking group '%s' as read..."), title),
+        timeout = 1,
+    })
+
+    account_name = account_name or "local"
+    local feeds = group.feeds or {}
+    local total_new_marks = 0
+    local feeds_processed = 0
+    local total_feeds = #feeds
+
+    local function processFeed(feed_index)
+        if feed_index > total_feeds then
+            UIManager:show(InfoMessage:new{
+                text = string.format(_("Marked %d item(s) in %d feed(s) as read."), total_new_marks, feeds_processed),
+                timeout = 3,
+            })
+            return
+        end
+
+        local feed = feeds[feed_index]
+        if not feed or not feed.url then
+            processFeed(feed_index + 1)
+            return
+        end
+
+        NetworkMgr:runWhenOnline(function()
+            local ok, items_or_err = FeedFetcher.fetch(feed.url)
+            if not ok then
+                processFeed(feed_index + 1)
+                return
+            end
+
+            local items = items_or_err or {}
+            if type(items) ~= "table" then
+                items = {}
+            end
+
+            local feed_identifier = feed.url or feed.id or feed.title or "local_feed"
+            local read_map = self.local_read_state.load(feed_identifier)
+            if type(read_map) ~= "table" then
+                read_map = {}
+            end
+
+            local new_marks = 0
+            for _, story in ipairs(items) do
+                normalizeStoryReadState(story)
+                local key = storyUniqueKey(story)
+                if key then
+                    if not read_map[key] then
+                        new_marks = new_marks + 1
+                    end
+                    read_map[key] = true
+                end
+            end
+
+            self.local_read_state.save(feed_identifier, read_map)
+            
+            local feed_node = feed._rss_feed_node
+            if feed_node then
+                feed_node._rss_local_read_map = read_map
+                for _, story in ipairs(feed_node._rss_stories or {}) do
+                    local key = story._rss_local_key or storyUniqueKey(story)
+                    if key then
+                        story._rss_local_key = key
+                        if read_map[key] then
+                            setStoryReadState(story, true)
+                        end
+                    end
+                end
+                self:_updateFeedCache({ feed_node = feed_node })
+            end
+            
+            total_new_marks = total_new_marks + new_marks
+            feeds_processed = feeds_processed + 1
+
+            processFeed(feed_index + 1)
+        end)
+    end
+
+    processFeed(1)
+end
+
+function MenuBuilder:showMarkAllAsReadDialogForLocalGroup(group, account_name)
+    if not group or not group.feeds then
+        UIManager:show(InfoMessage:new{
+            text = _("Group has no feeds."),
+            timeout = 3,
+        })
+        return
+    end
+
+    local title = group.title or _("Group")
+    local title_text = string.format(_("Mark all stories in group '%s' as read?"), title)
+
+    local dialog
+    dialog = ButtonDialog:new{
+        title = title_text,
+        buttons = {{
+            {
+                text = _("Cancel"),
+                background = Blitbuffer.COLOR_WHITE,
+                callback = function()
+                    UIManager:close(dialog)
+                end,
+            },
+            {
+                text = _("Mark all as read"),
+                background = Blitbuffer.COLOR_WHITE,
+                callback = function()
+                    UIManager:close(dialog)
+                    self:performLocalGroupMarkAllAsRead(group, account_name)
+                end,
+            },
+        }},
+    }
+    UIManager:show(dialog)
+end
+
 function MenuBuilder:showMarkAllAsReadDialogForAccount(account)
     local title_text = string.format(_("Mark all stories in account '%s' as read?"), account.name or _("Account"))
 
     local dialog
     dialog = ButtonDialog:new{
-        title = _("Confirm"),
-        text = title_text,
+        title = title_text,
         buttons = {{
             {
                 text = _("Cancel"),
@@ -1899,8 +2244,7 @@ function MenuBuilder:showMarkAllAsReadDialog(account, client, node)
 
     local dialog
     dialog = ButtonDialog:new{
-        title = _("Confirm"),
-        text = title_text,
+        title = title_text,
         buttons = {{
             {
                 text = _("Cancel"),
@@ -1927,7 +2271,19 @@ function MenuBuilder:performMarkAllAsRead(account, client, node)
     local account_type = account and account.type
 
     if node_type == "feed" then
-        if node._virtual then
+        if node._virtual or node.is_virtual then
+            -- Handle virtual feeds for different account types
+            if account_type == "commafeed" then
+                self:performMarkAllAsReadForCommaFeedVirtual(account, client, node)
+                return
+            elseif account_type == "fever" then
+                self:performMarkAllAsReadForFeverVirtual(account, client, node)
+                return
+            elseif account_type == "miniflux" then
+                self:performMarkAllAsReadForMinifluxVirtual(account, client, node)
+                return
+            end
+            
             UIManager:show(InfoMessage:new{
                 text = _("Mark all as read is not supported for virtual feeds. Please use individual feeds."),
                 timeout = 3,
@@ -1974,6 +2330,8 @@ function MenuBuilder:performMarkAllAsRead(account, client, node)
                 -- CommaFeed doesn't support category mark all as read, fall back to individual feeds
                 success = false
             elseif account_type == "commafeed" and client.markCategoryAsRead then
+                success, error_msg = client:markCategoryAsRead(node.id)
+            elseif account_type == "miniflux" and client.markCategoryAsRead then
                 success, error_msg = client:markCategoryAsRead(node.id)
             end
 
@@ -2067,6 +2425,225 @@ function MenuBuilder:performMarkAllAsRead(account, client, node)
             })
         end
     end)
+end
+
+function MenuBuilder:performMarkAllAsReadForCommaFeedVirtual(account, client, virtual_node)
+    local feed_ids = self:collectFeedsForCommaFeedVirtual(client, virtual_node)
+    
+    if #feed_ids == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("No feeds found to mark as read."),
+            timeout = 3,
+        })
+        return
+    end
+    
+    local confirmation_text = string.format(
+        _("All feeds will be marked as read one by one. This may take some time. Do you want to proceed?\n\nTotal feeds: %d"),
+        #feed_ids
+    )
+    
+    local dialog
+    dialog = ButtonDialog:new{
+        title = confirmation_text,
+        buttons = {{
+            {
+                text = _("Cancel"),
+                background = Blitbuffer.COLOR_WHITE,
+                callback = function()
+                    UIManager:close(dialog)
+                end,
+            },
+            {
+                text = _("OK"),
+                background = Blitbuffer.COLOR_WHITE,
+                callback = function()
+                    UIManager:close(dialog)
+                    
+                    NetworkMgr:runWhenOnline(function()
+                        local success_count = 0
+                        local error_messages = {}
+                        
+                        for index, feed_id in ipairs(feed_ids) do
+                            UIManager:show(InfoMessage:new{
+                                text = string.format(_("Marking feed %d/%d as read..."), index, #feed_ids),
+                                timeout = 1,
+                            })
+                            
+                            local ok, err = client:markFeedAsRead(feed_id)
+                            if ok then
+                                success_count = success_count + 1
+                            else
+                                table.insert(error_messages, string.format("Feed %s: %s", tostring(feed_id), err or _("Unknown error")))
+                            end
+                        end
+                        
+                        if success_count > 0 then
+                            UIManager:show(InfoMessage:new{
+                                text = string.format(_("Marked %d feed(s) as read."), success_count),
+                                timeout = 3,
+                            })
+                        end
+                        
+                        if #error_messages > 0 then
+                            local error_text = table.concat(error_messages, "\n")
+                            UIManager:show(InfoMessage:new{
+                                text = string.format(_("Errors occurred:\n%s"), error_text),
+                                timeout = 5,
+                            })
+                        end
+                    end)
+                end,
+            },
+        }},
+    }
+    UIManager:show(dialog)
+end
+
+function MenuBuilder:performMarkAllAsReadForFeverVirtual(account, client, virtual_node)
+    local feed_ids = self:collectFeedsForFeverVirtual(client, virtual_node)
+    
+    if #feed_ids == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("No feeds found to mark as read."),
+            timeout = 3,
+        })
+        return
+    end
+    
+    local confirmation_text = string.format(
+        _("All feeds will be marked as read one by one. This may take some time. Do you want to proceed?\n\nTotal feeds: %d"),
+        #feed_ids
+    )
+    
+    local dialog
+    dialog = ButtonDialog:new{
+        title = confirmation_text,
+        buttons = {{
+            {
+                text = _("Cancel"),
+                background = Blitbuffer.COLOR_WHITE,
+                callback = function()
+                    UIManager:close(dialog)
+                end,
+            },
+            {
+                text = _("OK"),
+                background = Blitbuffer.COLOR_WHITE,
+                callback = function()
+                    UIManager:close(dialog)
+                    
+                    NetworkMgr:runWhenOnline(function()
+                        local success_count = 0
+                        local error_messages = {}
+                        
+                        for index, feed_id in ipairs(feed_ids) do
+                            UIManager:show(InfoMessage:new{
+                                text = string.format(_("Marking feed %d/%d as read..."), index, #feed_ids),
+                                timeout = 1,
+                            })
+                            
+                            local ok, err = client:markFeedAsRead(feed_id)
+                            if ok then
+                                success_count = success_count + 1
+                            else
+                                table.insert(error_messages, string.format("Feed %s: %s", tostring(feed_id), err or _("Unknown error")))
+                            end
+                        end
+                        
+                        if success_count > 0 then
+                            UIManager:show(InfoMessage:new{
+                                text = string.format(_("Marked %d feed(s) as read."), success_count),
+                                timeout = 3,
+                            })
+                        end
+                        
+                        if #error_messages > 0 then
+                            local error_text = table.concat(error_messages, "\n")
+                            UIManager:show(InfoMessage:new{
+                                text = string.format(_("Errors occurred:\n%s"), error_text),
+                                timeout = 5,
+                            })
+                        end
+                    end)
+                end,
+            },
+        }},
+    }
+    UIManager:show(dialog)
+end
+
+function MenuBuilder:performMarkAllAsReadForMinifluxVirtual(account, client, virtual_node)
+    local feed_ids = self:collectFeedsForMinifluxVirtual(client, virtual_node)
+    
+    if #feed_ids == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("No feeds found to mark as read."),
+            timeout = 3,
+        })
+        return
+    end
+    
+    local confirmation_text = string.format(
+        _("All feeds will be marked as read one by one. This may take some time. Do you want to proceed?\n\nTotal feeds: %d"),
+        #feed_ids
+    )
+    
+    local dialog
+    dialog = ButtonDialog:new{
+        title = confirmation_text,
+        buttons = {{
+            {
+                text = _("Cancel"),
+                background = Blitbuffer.COLOR_WHITE,
+                callback = function()
+                    UIManager:close(dialog)
+                end,
+            },
+            {
+                text = _("OK"),
+                background = Blitbuffer.COLOR_WHITE,
+                callback = function()
+                    UIManager:close(dialog)
+                    
+                    NetworkMgr:runWhenOnline(function()
+                        local success_count = 0
+                        local error_messages = {}
+                        
+                        for index, feed_id in ipairs(feed_ids) do
+                            UIManager:show(InfoMessage:new{
+                                text = string.format(_("Marking feed %d/%d as read..."), index, #feed_ids),
+                                timeout = 1,
+                            })
+                            
+                            local ok, err = client:markFeedAsRead(feed_id)
+                            if ok then
+                                success_count = success_count + 1
+                            else
+                                table.insert(error_messages, string.format("Feed %s: %s", tostring(feed_id), err or _("Unknown error")))
+                            end
+                        end
+                        
+                        if success_count > 0 then
+                            UIManager:show(InfoMessage:new{
+                                text = string.format(_("Marked %d feed(s) as read."), success_count),
+                                timeout = 3,
+                            })
+                        end
+                        
+                        if #error_messages > 0 then
+                            local error_text = table.concat(error_messages, "\n")
+                            UIManager:show(InfoMessage:new{
+                                text = string.format(_("Errors occurred:\n%s"), error_text),
+                                timeout = 5,
+                            })
+                        end
+                    end)
+                end,
+            },
+        }},
+    }
+    UIManager:show(dialog)
 end
 
 function MenuBuilder:new(opts)
@@ -2367,7 +2944,7 @@ function MenuBuilder:buildAccountEntries(accounts, open_callback)
         end
         
         -- Add Mark all as read for API accounts
-        if account.type == "newsblur" or account.type == "commafeed" then
+        if account.type == "newsblur" or account.type == "commafeed" or account.type == "freshrss" or account.type == "miniflux" then
             table.insert(holds_items, {
                 text = _("Mark all as read"),
                 background = Blitbuffer.COLOR_WHITE,
@@ -2727,6 +3304,9 @@ function MenuBuilder:openAccount(reader, account)
     elseif account_type == "fever" then
         self:showFeverAccount(account, { force_refresh = true })
         return
+    elseif account_type == "miniflux" then
+        self:showMinifluxAccount(account, { force_refresh = true })
+        return
     end
 
     UIManager:show(InfoMessage:new{
@@ -2763,14 +3343,16 @@ function MenuBuilder:showLocalAccount(account)
     end
     for group_index, group in ipairs(groups) do
         local title = group.title or string.format(_("Local Group %d"), group_index)
+        local normal_callback = function()
+            self:showLocalGroup(group, account and account.name)
+        end
         table.insert(entries, {
             text = string.format(_("%s (group)"), title),
-            callback = function()
-                self:showLocalGroup(group, account and account.name)
-            end,
+            callback = normal_callback,
             hold_callback = function()
-                self:showLocalGroup(group, account and account.name)
+                self:createLongPressMenuForLocalGroup(group, account_name, normal_callback)
             end,
+            hold_keep_menu_open = true,
         })
     end
 
@@ -2885,6 +3467,10 @@ function MenuBuilder:showNewsBlurNode(account, client, node)
             table.insert(entries, {
                 text = display_title,
                 callback = normal_callback,
+                hold_callback = function()
+                    self:createLongPressMenuForFolder(account, client, child, normal_callback)
+                end,
+                hold_keep_menu_open = true,
             })
         elseif child.kind == "feed" then
             local unread_count = 0
@@ -3179,6 +3765,10 @@ function MenuBuilder:showCommaFeedNode(account, client, node)
             table.insert(entries, {
                 text = child.title or _("Untitled folder"),
                 callback = normal_callback,
+                hold_callback = function()
+                    self:createLongPressMenuForFolder(account, client, child, normal_callback)
+                end,
+                hold_keep_menu_open = true,
             })
         elseif child.kind == "feed" then
             local normal_callback = function()
@@ -3536,6 +4126,10 @@ function MenuBuilder:showFreshRSSNode(account, client, node)
             table.insert(entries, {
                 text = child.title or _("Untitled folder"),
                 callback = normal_callback,
+                hold_callback = function()
+                    self:createLongPressMenuForFolder(account, client, child, normal_callback)
+                end,
+                hold_keep_menu_open = true,
             })
         elseif child.kind == "feed" then
             local normal_callback = function()
@@ -3840,42 +4434,7 @@ function MenuBuilder:showFeverAccount(account, opts)
             return
         end
 
-        local virtual_feeds = {
-            {
-                kind = "feed",
-                id = "fever_all_feeds",
-                title = "★ " .. _("All Feeds"),
-                is_virtual = true,
-                virtual_type = "all",
-                feed = { unreadCount = 0 },
-            },
-            {
-                kind = "feed",
-                id = "fever_all_unread",
-                title = "★ " .. _("All Unread"),
-                is_virtual = true,
-                virtual_type = "unread",
-                feed = { unreadCount = 0 },
-            },
-        }
-
-        local enhanced_tree = {
-            kind = "root",
-            title = tree_or_err.title,
-            children = {},
-        }
-
-        for _, vf in ipairs(virtual_feeds) do
-            table.insert(enhanced_tree.children, vf)
-        end
-
-        for _, child in ipairs(tree_or_err.children or {}) do
-            table.insert(enhanced_tree.children, child)
-        end
-
-        client.tree_cache = enhanced_tree
-
-        self:showFeverNode(account, client, enhanced_tree)
+        self:showFeverNode(account, client, tree_or_err)
     end)
 end
 
@@ -3884,30 +4443,13 @@ function MenuBuilder:showFeverNode(account, client, node)
     local entries = {}
     
     for _, child in ipairs(children) do
-        if child.kind == "folder" then
-            local normal_callback = function()
-                self:showFeverNode(account, client, child)
-            end
-            table.insert(entries, {
-                text = child.title or _("Untitled folder"),
-                callback = normal_callback,
-            })
-        elseif child.kind == "feed" then
+        if child.kind == "feed" and child.is_virtual then
             local normal_callback = function()
                 self:showFeverFeed(account, client, child)
             end
-            local unread_count = child.feed.unreadCount or 0
-            local display_title = child.title or _("Untitled feed")
-            if unread_count > 0 then
-                display_title = display_title .. " (" .. tostring(unread_count) .. ")"
-            end
             table.insert(entries, {
-                text = display_title,
+                text = child.title or _("Virtual feed"),
                 callback = normal_callback,
-                hold_callback = function()
-                    self:createLongPressMenuForNode(account, client, child, normal_callback)
-                end,
-                hold_keep_menu_open = true,
             })
         end
     end
@@ -4048,11 +4590,7 @@ function MenuBuilder:showFeverFeed(account, client, feed_node, opts)
     NetworkMgr:runWhenOnline(function()
         local fetch_options = {}
         
-        if feed_node.is_virtual then
-            if feed_node.virtual_type == "unread" then
-                fetch_options.read_filter = "unread_only"
-            end
-        else
+        if feed_node.is_virtual and feed_node.virtual_type == "unread" then
             fetch_options.read_filter = "unread_only"
         end
         
@@ -4074,6 +4612,249 @@ function MenuBuilder:showFeverFeed(account, client, feed_node, opts)
             end
         end
         feed_node._rss_page = 1
+        feed_node._rss_has_more = data.more_stories or false
+
+        finalizeMenu()
+    end)
+end
+
+function MenuBuilder:showMinifluxAccount(account, opts)
+    opts = opts or {}
+    if not self.accounts or type(self.accounts.getMinifluxClient) ~= "function" then
+        UIManager:show(InfoMessage:new{
+            text = _("Miniflux integration is not available."),
+        })
+        return
+    end
+
+    local client, err = self.accounts:getMinifluxClient(account)
+    if not client then
+        UIManager:show(InfoMessage:new{
+            text = err or _("Unable to open Miniflux account."),
+        })
+        return
+    end
+
+    if not opts.force_refresh and client.tree_cache then
+        self:showMinifluxNode(account, client, client.tree_cache)
+        return
+    end
+
+    NetworkMgr:runWhenOnline(function()
+        local ok, tree_or_err = client:buildTree()
+        if not ok then
+            UIManager:show(InfoMessage:new{
+                text = tree_or_err or _("Failed to load Miniflux subscriptions."),
+            })
+            return
+        end
+
+        self:showMinifluxNode(account, client, tree_or_err)
+    end)
+end
+
+function MenuBuilder:showMinifluxNode(account, client, node)
+    local children = node and node.children or {}
+    local entries = {}
+    for _, child in ipairs(children) do
+        if child.kind == "folder" then
+            local normal_callback = function()
+                self:showMinifluxNode(account, client, child)
+            end
+            table.insert(entries, {
+                text = child.title or _("Untitled folder"),
+                callback = normal_callback,
+                hold_callback = function()
+                    self:createLongPressMenuForFolder(account, client, child, normal_callback)
+                end,
+                hold_keep_menu_open = true,
+            })
+        elseif child.kind == "feed" then
+            local normal_callback = function()
+                self:showMinifluxFeed(account, client, child)
+            end
+            local unread_count = 0
+            if child.feed then
+                unread_count = child.feed.unreadCount or 0
+            end
+            local display_title = child.title or _("Untitled feed")
+            if unread_count > 0 then
+                display_title = display_title .. " (" .. tostring(unread_count) .. ")"
+            end
+            table.insert(entries, {
+                text = display_title,
+                callback = normal_callback,
+                hold_callback = function()
+                    self:createLongPressMenuForNode(account, client, child, normal_callback)
+                end,
+                hold_keep_menu_open = true,
+            })
+        end
+    end
+
+    if #entries == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("No feeds available."),
+        })
+        return
+    end
+
+    local menu_instance = Menu:new{
+        title = node and node.title or (account and account.name) or _("Miniflux"),
+        item_table = entries,
+        onMenuHold = triggerHoldCallback,
+    }
+    self:showMenu(menu_instance, function()
+        self:showMinifluxNode(account, client, node)
+    end)
+
+    if menu_instance then
+        menu_instance.onMenuHold = triggerHoldCallback
+    end
+end
+
+function MenuBuilder:showMinifluxFeed(account, client, feed_node, opts)
+    opts = opts or {}
+    local reuse_cached_stories = opts.reuse and true or false
+    feed_node._rss_stories = feed_node._rss_stories or {}
+    feed_node._rss_story_keys = feed_node._rss_story_keys or {}
+    feed_node._rss_page = feed_node._rss_page or 0
+    feed_node._account_name = account.name
+    feed_node._rss_reader = self.reader
+
+    if self.reader and type(self.reader.getFeedState) == "function" then
+        local stored_state = self.reader:getFeedState(account.name, feed_node.id)
+        if stored_state then
+            if type(stored_state.stories) == "table" and #stored_state.stories > 0 then
+                feed_node._rss_stories = util.tableDeepCopy(stored_state.stories)
+                feed_node._rss_story_keys = util.tableDeepCopy(stored_state.story_keys or {})
+                feed_node._rss_page = stored_state.current_page or feed_node._rss_page
+                feed_node._rss_has_more = stored_state.has_more or feed_node._rss_has_more
+            end
+            if type(stored_state.menu_page) == "number" then
+                feed_node._rss_menu_page = feed_node._rss_menu_page or stored_state.menu_page
+                if not opts.menu_page then
+                    opts.menu_page = stored_state.menu_page
+                end
+            end
+        end
+    end
+
+    local fetch_page
+    if opts.page then
+        fetch_page = opts.page
+    elseif not reuse_cached_stories then
+        fetch_page = 1
+    end
+
+    local function finalizeMenu()
+        local stories = feed_node._rss_stories or {}
+        if #stories == 0 then
+            UIManager:show(InfoMessage:new{
+                text = _("No stories available."),
+            })
+            return
+        end
+
+        local context = {
+            feed_type = "miniflux",
+            account = account,
+            client = client,
+            feed_node = feed_node,
+            feed_id = feed_node.id,
+            refresh = function()
+                self:showMinifluxFeed(account, client, feed_node, { reuse = true })
+            end,
+            force_refresh_on_close = false,
+        }
+
+        local view_mode = "compact"
+        if self.reader and type(self.reader.getListViewMode) == "function" then
+            view_mode = self.reader:getListViewMode()
+        end
+
+        local entries = {}
+        for index, story in ipairs(stories) do
+            normalizeStoryLink(story)
+            table.insert(entries, {
+                text = buildStoryEntryText(story, true, view_mode),
+                bold = isUnread(story),
+                callback = self:createTapCallback(stories, index, context),
+                hold_callback = function()
+                    self:createStoryLongPressMenu(stories, index, context, function()
+                        self:showStory(stories, index, function(action, payload)
+                            self:handleStoryAction(stories, index, action, payload, context)
+                        end, nil, { disable_story_mutators = true }, context)
+                    end)
+                end,
+                hold_keep_menu_open = true,
+            })
+        end
+
+        local current_menu = self.reader and self.reader.current_menu_info and self.reader.current_menu_info.menu
+        local menu_instance
+        if current_menu and current_menu._rss_feed_node == feed_node then
+            menu_instance = current_menu
+            if menu_instance.setTitle then
+                menu_instance:setTitle(feed_node.title or (account and account.name) or _("Miniflux"))
+            end
+            if menu_instance.switchItemTable then
+                menu_instance:switchItemTable(nil, entries)
+            end
+            menu_instance.onMenuHold = triggerHoldCallback
+        else
+            menu_instance = Menu:new{
+                title = feed_node.title or (account and account.name) or _("Miniflux"),
+                item_table = entries,
+                multilines_forced = true,
+                items_max_lines = view_mode == "magazine" and 5 or nil,
+            }
+            menu_instance._rss_feed_node = feed_node
+            menu_instance.onMenuHold = triggerHoldCallback
+            ensureMenuCloseHook(menu_instance)
+            trackMenuPage(menu_instance, feed_node)
+            self:showMenu(menu_instance, function()
+                self:showMinifluxFeed(account, client, feed_node, { reuse = true })
+            end)
+        end
+
+        if menu_instance then
+            context.menu_instance = menu_instance
+            menu_instance._rss_feed_node = feed_node
+            menu_instance.onMenuHold = triggerHoldCallback
+            ensureMenuCloseHook(menu_instance)
+            trackMenuPage(menu_instance, feed_node)
+        end
+    end
+
+    if reuse_cached_stories and #feed_node._rss_stories > 0 then
+        finalizeMenu()
+        return
+    end
+
+    NetworkMgr:runWhenOnline(function()
+        local fetch_options = {
+            page = fetch_page or 1,
+        }
+
+        local ok, data = client:fetchStories(feed_node.id, fetch_options)
+        if not ok then
+            UIManager:show(InfoMessage:new{
+                text = data or _("Failed to fetch stories."),
+            })
+            return
+        end
+
+        local stories = data.stories or {}
+        feed_node._rss_stories = stories
+        feed_node._rss_story_keys = {}
+        for _, story in ipairs(stories) do
+            local key = story.story_hash or story.hash or story.guid or story.story_id or story.id
+            if key then
+                feed_node._rss_story_keys[key] = true
+            end
+        end
+        feed_node._rss_page = fetch_page or 1
         feed_node._rss_has_more = data.more_stories or false
 
         finalizeMenu()

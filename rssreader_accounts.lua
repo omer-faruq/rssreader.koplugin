@@ -24,6 +24,7 @@ function Accounts:new()
         commafeed_clients = {},
         freshrss_clients = {},
         fever_clients = {},
+        miniflux_clients = {},
     }
     setmetatable(instance, self)
     return instance
@@ -109,6 +110,23 @@ function Accounts:getFeverClient(account)
     local Fever = require("rssreader_fever")
     local client = Fever:new(account)
     self.fever_clients[account.name] = client
+    return client
+end
+
+function Accounts:getMinifluxClient(account)
+    if not account or account.type ~= "miniflux" then
+        return nil, "Account is not a Miniflux account"
+    end
+    if not account.name then
+        return nil, "Miniflux account is missing a name"
+    end
+    if self.miniflux_clients[account.name] then
+        return self.miniflux_clients[account.name]
+    end
+
+    local Miniflux = require("rssreader_miniflux")
+    local client = Miniflux:new(account)
+    self.miniflux_clients[account.name] = client
     return client
 end
 

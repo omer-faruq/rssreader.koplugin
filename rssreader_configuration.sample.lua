@@ -33,6 +33,18 @@ return {
                 default_folder = nil,
             },
         },
+        {
+            name = "My Miniflux",
+            type = "miniflux",
+            active = false,
+            auth = {
+                base_url = "http://localhost:8080",
+                api_key = "your_miniflux_api_key",
+            },
+            options = {
+                default_folder = nil,
+            },
+        },
         {  
             name = "My FreshRSS",  
             type = "freshrss",  

@@ -17,7 +17,8 @@ The plugin supports several account types:
 - **NewsBlur**: Online RSS aggregator (requires premium subscription for full access)
 - **CommaFeed**: Self-hosted or cloud-based RSS aggregator (**Recommended**)
 - **FreshRSS**: Self-hosted RSS aggregator
-- **Fever API**: Generic API compatible with Miniflux, self-hosted CommaFeed, and other services
+- **Miniflux**: Self-hosted minimalist RSS aggregator with native API support
+- **Fever API**: Generic API compatible with other services
 
 ### Why CommaFeed is Recommended
 CommaFeed offers the most comprehensive feature set for RSS reading on KOReader:
@@ -27,11 +28,11 @@ CommaFeed offers the most comprehensive feature set for RSS reading on KOReader:
 - ✅ **Free tier available** – Use the official hosted service at [commafeed.com](https://www.commafeed.com) or self-host
 - ✅ **Full API support** – Mark as read, pagination, and all core features work seamlessly
 
-Other services like NewsBlur and FreshRSS are fully supported, but may lack category-level virtual feeds or require premium subscriptions.
+Other services like NewsBlur, FreshRSS, and Miniflux are fully supported with similar features. Miniflux provides native API support with folder/category organization and mark as read functionality.
 
 ## Files You Need to Edit
 - **`rssreader_configuration.sample.lua` → rename to `rssreader_configuration.lua`**: Describe your accounts and per-account preferences.
-  - Provide the name, service type (`local`, `newsblur`, `commafeed`, `freshrss`, `fever`), login details, and options.
+  - Provide the name, service type (`local`, `newsblur`, `commafeed`, `freshrss`, `miniflux`, `fever`), login details, and options.
   - Add as many entries as you like, even multiple accounts for the same service type.
   - Use the `active` field to temporarily disable or re-enable an account.
   - After editing, reload the plugin inside KOReader to see your changes in the account list.
@@ -49,7 +50,7 @@ The other Lua files handle internal logic. End users do not need to open or modi
 - For local accounts, the groups and feeds defined in your renamed `rssreader_local_defaults.lua` appear. Editing the URLs here is how you add new sources.
 
 ## Virtual "All Feeds" Aggregated Views
-NewsBlur, CommaFeed, and Fever API accounts include special virtual feeds that aggregate stories from all your subscriptions:
+NewsBlur, CommaFeed, Miniflux, and Fever API accounts include special virtual feeds that aggregate stories from all your subscriptions:
 - **★ All Feeds** – View all stories from all subscribed feeds in a single chronological list
 - **★ All Unread** – View only unread stories from all feeds combined
 - Stories are prefixed with their feed name (max 5 characters) for easy identification
@@ -59,14 +60,17 @@ NewsBlur, CommaFeed, and Fever API accounts include special virtual feeds that a
 ### Availability by Service
 - **NewsBlur**: Virtual feeds appear at the top of the root feed list (requires premium subscription for full access)
 - **CommaFeed**: Virtual feeds appear at the top of both the root feed list and inside each category/folder
-- **Fever API**: Virtual feeds appear only at the root level (category-level virtual feeds not supported due to API limitations)
+- **Miniflux**: Virtual feeds appear at the top of both the root feed list and inside each category/folder
+- **Fever API**: Only virtual feeds are supported (★ All Feeds, ★ All Unread). Individual feeds and folders are not shown due to API limitations.
 
 ### Settings
 - Toggle NewsBlur virtual feeds visibility: **RSS Reader** → **Settings** → **Show NewsBlur 'All Feeds'**
 - Default: Visible (can be disabled if you prefer not to see them)
 - Changes take effect immediately when you reopen the NewsBlur account
 
-**Note**: Virtual feeds cannot be marked as read in bulk. Use individual feeds for "Mark all as read" functionality.
+### Mark All as Read for Virtual Feeds
+- **CommaFeed & Miniflux**: Virtual feeds support "Mark all as read" functionality. Long-press a virtual feed to mark all stories in that view as read.
+- **NewsBlur & Fever API**: Virtual feeds cannot be marked as read in bulk. Use individual feeds for "Mark all as read" functionality.
 
 ## Tap Action on Feed Items
 Configure what happens when you tap a story in the feed list:
@@ -126,7 +130,7 @@ The exported OPML file includes:
 - All feeds with their titles and URLs
 - Standard OPML 2.0 format compatible with most RSS readers
 
-**Note**: Only local accounts are included in the export. NewsBlur, CommaFeed, and FreshRSS accounts are managed by their respective services and are not exported.
+**Note**: Only local accounts are included in the export. NewsBlur, CommaFeed, FreshRSS, and Miniflux accounts are managed by their respective services and are not exported.
 
 ## Ready-to-Use Defaults
 - If you need a template, use `rssreader_configuration.sample.lua` and rename it to `rssreader_configuration.lua` after customizing.
