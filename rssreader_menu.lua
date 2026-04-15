@@ -2146,19 +2146,10 @@ end
 
 function MenuBuilder:showPoolStoryList()
     local stories = Pool.getStories()
-    if #stories == 0 then
-        UIManager:show(InfoMessage:new{
-            text = _("List is empty."),
-            timeout = 3,
-        })
-        return
-    end
-
     local view_mode = "compact"
     if self.reader and type(self.reader.getListViewMode) == "function" then
         view_mode = self.reader:getListViewMode()
     end
-
     local tap_action = "preview"
     if self.reader and type(self.reader.getTapAction) == "function" then
         tap_action = self.reader:getTapAction()
@@ -2166,6 +2157,7 @@ function MenuBuilder:showPoolStoryList()
 
     local entries = {}
     for index, story in ipairs(stories) do
+        local current_index = index
         utils.normalizeStoryReadState(story)
         utils.normalizeStoryLink(story)
         local is_unread = not (story._pool_read == true)
@@ -2176,20 +2168,20 @@ function MenuBuilder:showPoolStoryList()
         local tap_callback
         if tap_action == "save" then
             tap_callback = function()
-                self:poolSaveSingleStory(story, index)
+                self:poolSaveSingleStory(story, current_index)
             end
         elseif tap_action == "open" then
             tap_callback = function()
                 if not story._pool_read then
-                    Pool.markRead(index)
+                    Pool.markRead(current_index)
                     story._pool_read = true
                     story._rss_is_read = true
                 end
-                self:handlePoolStoryAction(stories, index, "go_to_link", { story = story })
+                self:handlePoolStoryAction(stories, current_index, "go_to_link", { story = story })
             end
         elseif tap_action == "addtolist" then
             tap_callback = function()
-                Pool.removeStory(index)
+                Pool.removeStory(current_index)
                 UIManager:show(InfoMessage:new{ text = _("Removed from List."), timeout = 1 })
                 UIManager:scheduleIn(0.1, function()
                     self:refreshPoolMenu()
@@ -2197,7 +2189,7 @@ function MenuBuilder:showPoolStoryList()
             end
         else
             tap_callback = function()
-                self:poolShowStoryPreview(stories, index)
+                self:poolShowStoryPreview(stories, current_index)
             end
         end
         
@@ -2206,7 +2198,7 @@ function MenuBuilder:showPoolStoryList()
             bold = is_unread,
             callback = tap_callback,
             hold_callback = function()
-                self:poolStoryLongPress(stories, index)
+                self:poolStoryLongPress(stories, current_index)
             end,
             hold_keep_menu_open = true,
         })
@@ -2448,12 +2440,17 @@ function MenuBuilder:poolStoryLongPress(stories, index)
                 closeDialog()
                 Pool.removeStory(index)
                 UIManager:show(InfoMessage:new{ text = _("Removed from List."), timeout = 2 })
-                self:refreshPoolMenu()
+                UIManager:scheduleIn(0.1, function()
+                    self:refreshPoolMenu()
+                end)
             end,
         },
     })
 
+
+
     table.insert(buttons, {
+
         {
             text = _("Show QR Code"),
             background = Blitbuffer.COLOR_WHITE,
@@ -2508,6 +2505,7 @@ function MenuBuilder:refreshPoolMenu()
 
         local entries = {}
         for index, story in ipairs(stories) do
+            local current_index = index
             utils.normalizeStoryReadState(story)
             utils.normalizeStoryLink(story)
             local is_unread = not (story._pool_read == true)
@@ -2518,20 +2516,20 @@ function MenuBuilder:refreshPoolMenu()
             local tap_callback
             if tap_action == "save" then
                 tap_callback = function()
-                    self:poolSaveSingleStory(story, index)
+                    self:poolSaveSingleStory(story, current_index)
                 end
             elseif tap_action == "open" then
                 tap_callback = function()
                     if not story._pool_read then
-                        Pool.markRead(index)
+                        Pool.markRead(current_index)
                         story._pool_read = true
                         story._rss_is_read = true
                     end
-                    self:handlePoolStoryAction(stories, index, "go_to_link", { story = story })
+                    self:handlePoolStoryAction(stories, current_index, "go_to_link", { story = story })
                 end
             elseif tap_action == "addtolist" then
                 tap_callback = function()
-                    Pool.removeStory(index)
+                    Pool.removeStory(current_index)
                     UIManager:show(InfoMessage:new{ text = _("Removed from List."), timeout = 1 })
                     UIManager:scheduleIn(0.1, function()
                         self:refreshPoolMenu()
@@ -2539,7 +2537,7 @@ function MenuBuilder:refreshPoolMenu()
                 end
             else
                 tap_callback = function()
-                    self:poolShowStoryPreview(stories, index)
+                    self:poolShowStoryPreview(stories, current_index)
                 end
             end
             
@@ -2548,7 +2546,7 @@ function MenuBuilder:refreshPoolMenu()
                 bold = is_unread,
                 callback = tap_callback,
                 hold_callback = function()
-                    self:poolStoryLongPress(stories, index)
+                    self:poolStoryLongPress(stories, current_index)
                 end,
                 hold_keep_menu_open = true,
             })
