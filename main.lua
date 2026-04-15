@@ -253,6 +253,14 @@ function RSSReader:restoreNavigationState(state)
 
     -- Try to restore feed list state
     local feed_state = state.current_feed_state
+    
+    -- Check if this is a pool restore
+    if feed_state.account_name == "pool" then
+        local builder = MenuBuilder:new{ accounts = self.accounts, reader = self }
+        builder:showPoolStoryList()
+        return true
+    end
+    
     local accounts = self.accounts:getAccounts()
 
     -- Find matching account

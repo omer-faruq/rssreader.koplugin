@@ -21,6 +21,7 @@ local _ = require("gettext")
 local HtmlResources = require("rssreader_html_resources")
 local urlmod = require("socket.url")
 local NetworkMgr = require("ui/network/manager")
+local Pool = require("rssreader_pool")
 
 local Screen = Device.screen
 
@@ -296,6 +297,39 @@ local function buildToolbarButtons(story, on_action, close_handler, include_clos
                     on_action("mark_unread", story)
                 end,
                 disabled = not allow_mark_unread,
+            })
+        end
+        if options and options.is_pool then
+            table.insert(first_row, {
+                text = _("Remove from List"),
+                background = Blitbuffer.COLOR_WHITE,
+                callback = function()
+                    local pool_index = options.pool_index
+                    if pool_index then
+                        Pool.removeStory(pool_index)
+                        UIManager:show(InfoMessage:new{ text = _("Removed from List."), timeout = 2 })
+                        if close_handler then
+                            close_handler()
+                        end
+                    end
+                end,
+            })
+        else
+            table.insert(first_row, {
+                text = _("Add to List"),
+                background = Blitbuffer.COLOR_WHITE,
+                callback = function()
+                    local ok, err = Pool.addStory(story)
+                    if ok then
+                        UIManager:show(InfoMessage:new{ text = _("Added to List."), timeout = 2 })
+                    elseif err == "duplicate" then
+                        UIManager:show(InfoMessage:new{ text = _("Already in List."), timeout = 2 })
+                    elseif err == "pool_full" then
+                        UIManager:show(InfoMessage:new{ text = _("List is full."), timeout = 2 })
+                    else
+                        UIManager:show(InfoMessage:new{ text = _("Could not add to List."), timeout = 2 })
+                    end
+                end,
             })
         end
         if options and options.include_save then

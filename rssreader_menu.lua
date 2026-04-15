@@ -25,6 +25,7 @@ local QRMessage = require("ui/widget/qrmessage")
 
 local utils = require("rssreader_menu_utils")
 local backends = require("rssreader_menu_backends")
+local Pool = require("rssreader_pool")
 
 local LocalReadState
 
@@ -645,6 +646,26 @@ function MenuBuilder:createStoryLongPressMenu(stories, index, context, open_call
             end,
         },
     }}
+
+    table.insert(buttons, {
+        {
+            text = _("Add to List"),
+            background = Blitbuffer.COLOR_WHITE,
+            callback = function()
+                closeDialog()
+                local ok, err = Pool.addStory(story)
+                if ok then
+                    UIManager:show(InfoMessage:new{ text = _("Added to List."), timeout = 2 })
+                elseif err == "duplicate" then
+                    UIManager:show(InfoMessage:new{ text = _("Already in List."), timeout = 2 })
+                elseif err == "pool_full" then
+                    UIManager:show(InfoMessage:new{ text = _("List is full."), timeout = 2 })
+                else
+                    UIManager:show(InfoMessage:new{ text = _("Could not add to List."), timeout = 2 })
+                end
+            end,
+        },
+    })
 
     local mark_text
     local mark_action
@@ -1591,6 +1612,17 @@ function MenuBuilder:buildAccountEntries(accounts, open_callback)
             holds = holds_items,
         })
     end
+    local pool_count = Pool.count()
+    local pool_label = pool_count > 0
+        and string.format(_("List (%d)"), pool_count)
+        or _("List")
+    table.insert(entries, {
+        text = pool_label,
+        keep_menu_open = true,
+        callback = function()
+            self:showPoolPopup()
+        end,
+    })
     table.insert(entries, {
         text = _("Settings"),
         keep_menu_open = true,
@@ -2027,6 +2059,716 @@ function MenuBuilder:showLocalGroup(group, account_name)
     self:showMenu(menu_instance, function()
         self:showLocalGroup(group, account_name)
     end)
+end
+
+-- ────────────────────────────────────────────────────────────
+-- Reading List (Pool)
+-- ────────────────────────────────────────────────────────────
+
+function MenuBuilder:showPoolPopup()
+    local pool_count = Pool.count()
+    local dialog
+    dialog = ButtonDialog:new{
+        title = string.format(_("List (%d)"), pool_count),
+        buttons = {
+            {{
+                text = _("Story List"),
+                background = Blitbuffer.COLOR_WHITE,
+                align = "left",
+                callback = function()
+                    UIManager:close(dialog)
+                    self:showPoolStoryList()
+                end,
+            }},
+            {{
+                text = _("Clear List"),
+                background = Blitbuffer.COLOR_WHITE,
+                align = "left",
+                callback = function()
+                    UIManager:close(dialog)
+                    self:showPoolClearConfirm()
+                end,
+            }},
+            {{
+                text = _("Save All"),
+                background = Blitbuffer.COLOR_WHITE,
+                align = "left",
+                callback = function()
+                    UIManager:close(dialog)
+                    self:poolSaveAll()
+                end,
+            }},
+        },
+    }
+    UIManager:show(dialog)
+end
+
+function MenuBuilder:showPoolStoryList()
+    local stories = Pool.getStories()
+    if #stories == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("List is empty."),
+            timeout = 3,
+        })
+        return
+    end
+
+    local view_mode = "compact"
+    if self.reader and type(self.reader.getListViewMode) == "function" then
+        view_mode = self.reader:getListViewMode()
+    end
+
+    local tap_action = "preview"
+    if self.reader and type(self.reader.getTapAction) == "function" then
+        tap_action = self.reader:getTapAction()
+    end
+
+    local entries = {}
+    for index, story in ipairs(stories) do
+        utils.normalizeStoryReadState(story)
+        utils.normalizeStoryLink(story)
+        local is_unread = not (story._pool_read == true)
+        if is_unread then
+            story._rss_is_read = false
+        end
+        
+        local tap_callback
+        if tap_action == "save" then
+            tap_callback = function()
+                self:poolSaveSingleStory(story, index)
+            end
+        elseif tap_action == "open" then
+            tap_callback = function()
+                if not story._pool_read then
+                    Pool.markRead(index)
+                    story._pool_read = true
+                    story._rss_is_read = true
+                end
+                self:handlePoolStoryAction(stories, index, "go_to_link", { story = story })
+            end
+        else
+            tap_callback = function()
+                self:poolShowStoryPreview(stories, index)
+            end
+        end
+        
+        table.insert(entries, {
+            text = utils.buildStoryEntryText(story, true, view_mode),
+            bold = is_unread,
+            callback = tap_callback,
+            hold_callback = function()
+                self:poolStoryLongPress(stories, index)
+            end,
+            hold_keep_menu_open = true,
+        })
+    end
+
+    local menu_instance
+    menu_instance = Menu:new{
+        title = string.format(_("List (%d)"), #stories),
+        item_table = entries,
+        multilines_forced = true,
+        items_max_lines = view_mode == "magazine" and 5 or nil,
+    }
+    menu_instance.onMenuHold = utils.triggerHoldCallback
+    
+    -- Mark this as a pool menu for state restoration
+    menu_instance._rss_feed_node = {
+        kind = "pool",
+        id = "pool",
+        title = string.format(_("List (%d)"), #stories),
+        _account_name = "pool",
+        _rss_stories = stories,
+        _rss_story_keys = {},
+        _rss_page = 1,
+        _rss_has_more = false,
+    }
+    
+    self:showMenu(menu_instance, function()
+        self:showPoolStoryList()
+    end)
+end
+
+function MenuBuilder:poolShowStoryPreview(stories, index)
+    local story = stories and stories[index]
+    if not story then
+        return
+    end
+
+    -- Mark as read in pool
+    if not story._pool_read then
+        Pool.markRead(index)
+        story._pool_read = true
+        story._rss_is_read = true
+    end
+
+    self.story_viewer = self.story_viewer or StoryViewer:new()
+
+    local show_images_in_preview = false
+    if self.accounts and self.accounts.config then
+        local flag = util.tableGetValue(self.accounts.config, "features", "show_images_in_preview")
+        show_images_in_preview = flag == true
+    end
+
+    self.story_viewer:showStory(story, function(action, payload)
+        self:handlePoolStoryAction(stories, index, action, payload)
+    end, function()
+        -- Refresh list on close
+        if self.reader and self.reader.current_menu_info and self.reader.current_menu_info.menu then
+            self.reader:updateBackButton(self.reader.current_menu_info.menu)
+        end
+        self:refreshPoolMenu()
+    end, {
+        include_save = true,
+        disable_story_mutators = false,
+        is_api_version = false,
+        allow_mark_unread = true,
+        show_images_in_preview = show_images_in_preview,
+        is_pool = true,
+        pool_index = index,
+    })
+end
+
+function MenuBuilder:handlePoolStoryAction(stories, index, action, payload)
+    local story = stories and stories[index]
+    if not story then
+        return
+    end
+
+    if action == "go_to_link" then
+        local payload_table = type(payload) == "table" and payload or {}
+        local target_story = payload_table.story or story
+        utils.normalizeStoryLink(target_story)
+
+        local function closeCurrentStory()
+            if type(payload_table.close_story) == "function" then
+                payload_table.close_story()
+            end
+        end
+
+        local function closeActiveMenu()
+            local reader = self.reader
+            if reader and reader.current_menu_info and reader.current_menu_info.menu then
+                UIManager:close(reader.current_menu_info.menu)
+                reader.current_menu_info = nil
+            end
+        end
+
+        -- Mark as read in pool
+        if not story._pool_read then
+            Pool.markRead(index)
+            story._pool_read = true
+            story._rss_is_read = true
+        end
+
+        closeCurrentStory()
+        closeActiveMenu()
+
+        utils.downloadStoryToCache(target_story, self, function(path, err)
+            if err then
+                local link = target_story and (target_story.permalink or target_story.href or target_story.link)
+                if link then
+                    UIManager:show(InfoMessage:new{ text = string.format(_("Opening: %s"), link) })
+                end
+            end
+        end)
+        return
+    end
+
+    if action == "save_story" then
+        local payload_table = type(payload) == "table" and payload or {}
+        local target_story = payload_table.story or story
+        self:poolSaveSingleStory(target_story, index)
+        return
+    end
+
+    if action == "mark_read" then
+        if story then
+            Pool.markRead(index)
+            story._pool_read = true
+            story._rss_is_read = true
+            utils.setStoryReadState(story, true)
+        end
+        return
+    end
+
+    if action == "mark_unread" then
+        if story then
+            Pool.markUnread(index)
+            story._pool_read = false
+            story._rss_is_read = false
+            utils.setStoryReadState(story, false)
+        end
+        return
+    end
+
+    if action == "next_story" then
+        local next_index = index + 1
+        if next_index <= #stories then
+            self:poolShowStoryPreview(stories, next_index)
+        else
+            UIManager:show(InfoMessage:new{ text = _("No more stories."), timeout = 2 })
+        end
+        return
+    end
+
+    if action == "next_unread" then
+        for i = index + 1, #stories do
+            if not stories[i]._pool_read then
+                self:poolShowStoryPreview(stories, i)
+                return
+            end
+        end
+        UIManager:show(InfoMessage:new{ text = _("No unread stories found."), timeout = 2 })
+        return
+    end
+end
+
+function MenuBuilder:poolStoryLongPress(stories, index)
+    local story = stories and stories[index]
+    if not story then
+        return
+    end
+
+    utils.normalizeStoryReadState(story)
+    local dialog
+    local is_read = story._pool_read == true
+    local story_link = story.permalink or story.href or story.link
+
+    local function closeDialog()
+        if dialog then
+            UIManager:close(dialog)
+        end
+    end
+
+    local buttons = {{
+        {
+            text = _("Preview"),
+            background = Blitbuffer.COLOR_WHITE,
+            callback = function()
+                closeDialog()
+                self:poolShowStoryPreview(stories, index)
+            end,
+        },
+        {
+            text = _("Open"),
+            background = Blitbuffer.COLOR_WHITE,
+            callback = function()
+                closeDialog()
+                if not story._pool_read then
+                    Pool.markRead(index)
+                    story._pool_read = true
+                    story._rss_is_read = true
+                end
+                self:handlePoolStoryAction(stories, index, "go_to_link", { story = story })
+            end,
+        },
+        {
+            text = _("Save"),
+            background = Blitbuffer.COLOR_WHITE,
+            callback = function()
+                closeDialog()
+                self:poolSaveSingleStory(story, index)
+            end,
+        },
+    }}
+
+    local mark_text = is_read and _("Mark as unread") or _("Mark as read")
+    table.insert(buttons, {
+        {
+            text = mark_text,
+            background = Blitbuffer.COLOR_WHITE,
+            callback = function()
+                closeDialog()
+                if is_read then
+                    Pool.markUnread(index)
+                    story._pool_read = false
+                    story._rss_is_read = false
+                else
+                    Pool.markRead(index)
+                    story._pool_read = true
+                    story._rss_is_read = true
+                end
+                self:refreshPoolMenu()
+            end,
+        },
+        {
+            text = _("Remove from list"),
+            background = Blitbuffer.COLOR_WHITE,
+            callback = function()
+                closeDialog()
+                Pool.removeStory(index)
+                UIManager:show(InfoMessage:new{ text = _("Removed from List."), timeout = 2 })
+                self:refreshPoolMenu()
+            end,
+        },
+    })
+
+    table.insert(buttons, {
+        {
+            text = _("Show QR Code"),
+            background = Blitbuffer.COLOR_WHITE,
+            enabled = story_link ~= nil,
+            callback = function()
+                closeDialog()
+                local qr_size = math.min(Screen:getWidth(), Screen:getHeight()) * 0.6
+                UIManager:show(QRMessage:new{
+                    text = story_link,
+                    width = qr_size,
+                    height = qr_size,
+                })
+            end,
+        },
+        {
+            text = _("Close"),
+            background = Blitbuffer.COLOR_WHITE,
+            callback = function()
+                closeDialog()
+            end,
+        },
+    })
+
+    local menu_title = story.story_title or story.title or _("Story")
+    local snippet = utils.storySnippet(story, 500)
+    if snippet then
+        menu_title = menu_title .. "\n" .. string.rep("─", 20) .. "\n" .. snippet
+    end
+
+    dialog = ButtonDialog:new{
+        title = menu_title,
+        buttons = buttons,
+    }
+
+    UIManager:show(dialog)
+    return dialog
+end
+
+function MenuBuilder:refreshPoolMenu()
+    local stories = Pool.getStories()
+    if self.reader and self.reader.current_menu_info and self.reader.current_menu_info.menu then
+        local menu = self.reader.current_menu_info.menu
+        local view_mode = "compact"
+        if self.reader and type(self.reader.getListViewMode) == "function" then
+            view_mode = self.reader:getListViewMode()
+        end
+
+        local tap_action = "preview"
+        if self.reader and type(self.reader.getTapAction) == "function" then
+            tap_action = self.reader:getTapAction()
+        end
+
+        local entries = {}
+        for index, story in ipairs(stories) do
+            utils.normalizeStoryReadState(story)
+            utils.normalizeStoryLink(story)
+            local is_unread = not (story._pool_read == true)
+            if is_unread then
+                story._rss_is_read = false
+            end
+            
+            local tap_callback
+            if tap_action == "save" then
+                tap_callback = function()
+                    self:poolSaveSingleStory(story, index)
+                end
+            elseif tap_action == "open" then
+                tap_callback = function()
+                    if not story._pool_read then
+                        Pool.markRead(index)
+                        story._pool_read = true
+                        story._rss_is_read = true
+                    end
+                    self:handlePoolStoryAction(stories, index, "go_to_link", { story = story })
+                end
+            else
+                tap_callback = function()
+                    self:poolShowStoryPreview(stories, index)
+                end
+            end
+            
+            table.insert(entries, {
+                text = utils.buildStoryEntryText(story, true, view_mode),
+                bold = is_unread,
+                callback = tap_callback,
+                hold_callback = function()
+                    self:poolStoryLongPress(stories, index)
+                end,
+                hold_keep_menu_open = true,
+            })
+        end
+
+        if menu.switchItemTable then
+            menu:switchItemTable(
+                string.format(_("List (%d)"), #stories),
+                entries
+            )
+        end
+    end
+end
+
+function MenuBuilder:poolSaveSingleStory(story, pool_index)
+    if not story then
+        UIManager:show(InfoMessage:new{ text = _("Could not save story."), timeout = 3 })
+        return
+    end
+
+    utils.normalizeStoryLink(story)
+    UIManager:show(InfoMessage:new{ text = _("Saving story..."), timeout = 1 })
+
+    utils.fetchStoryContent(story, self, function(content, err, download_info)
+        if not content then
+            UIManager:show(InfoMessage:new{ text = _("Failed to download story."), timeout = 3 })
+            return
+        end
+
+        local directory = utils.determineSaveDirectory(self)
+        if not directory or directory == "" then
+            UIManager:show(InfoMessage:new{ text = _("No target folder available."), timeout = 3 })
+            return
+        end
+        util.makePath(directory)
+
+        local filename = utils.safeFilenameFromStory(story)
+        local metadata = type(download_info) == "table" and download_info or {}
+        local include_images = metadata.images_requested and true or false
+        local html_for_epub = metadata.html_for_epub
+        local should_create_epub = include_images and type(html_for_epub) == "string" and html_for_epub ~= ""
+        local assets_root = metadata.assets_root or (metadata.assets and metadata.assets.assets_root)
+        local function cleanupAssets()
+            if assets_root then
+                HtmlResources.cleanupAssets(assets_root)
+                assets_root = nil
+            end
+        end
+
+        if should_create_epub and utils.EpubDownloadBackend then
+            local base_name = filename:gsub("%.html$", "")
+            local epub_path = utils.buildUniqueTargetPathWithExtension(directory, base_name, "epub")
+            local story_url = metadata.original_url or story.permalink or story.href or story.link or ""
+            local ok, result_or_err = pcall(function()
+                return utils.EpubDownloadBackend:createEpub(epub_path, html_for_epub, story_url, include_images)
+            end)
+            local success = ok and result_or_err ~= false
+            if success then
+                cleanupAssets()
+                -- Remove from pool after save
+                if pool_index then
+                    Pool.removeStory(pool_index)
+                    self:refreshPoolMenu()
+                end
+                UIManager:show(InfoMessage:new{ text = string.format(_("Saved to: %s"), epub_path), timeout = 3 })
+                return
+            else
+                logger.warn("RSSReader Pool", "Failed to create EPUB", result_or_err)
+                cleanupAssets()
+            end
+        end
+
+        local target_path = utils.buildUniqueTargetPath(directory, filename)
+        local story_url_for_html = metadata.original_url or story.permalink or story.href or story.link or ""
+        if not utils.writeStoryHtmlFile(content, target_path, utils.resolveStoryDocumentTitle(story), story_url_for_html) then
+            cleanupAssets()
+            UIManager:show(InfoMessage:new{ text = _("Failed to save story."), timeout = 3 })
+            return
+        end
+
+        cleanupAssets()
+        -- Remove from pool after save
+        if pool_index then
+            Pool.removeStory(pool_index)
+            self:refreshPoolMenu()
+        end
+        UIManager:show(InfoMessage:new{ text = string.format(_("Saved to: %s"), target_path), timeout = 3 })
+    end, { silent = true })
+end
+
+function MenuBuilder:showPoolClearConfirm()
+    local pool_count = Pool.count()
+    if pool_count == 0 then
+        UIManager:show(InfoMessage:new{ text = _("List is already empty."), timeout = 3 })
+        return
+    end
+
+    local confirm_dialog
+    confirm_dialog = ButtonDialog:new{
+        title = string.format(_("Clear all %d items from the List?"), pool_count),
+        buttons = {{
+            {
+                text = _("Cancel"),
+                background = Blitbuffer.COLOR_WHITE,
+                callback = function()
+                    UIManager:close(confirm_dialog)
+                end,
+            },
+            {
+                text = _("Clear All"),
+                background = Blitbuffer.COLOR_WHITE,
+                callback = function()
+                    UIManager:close(confirm_dialog)
+                    Pool.clear()
+                    UIManager:show(InfoMessage:new{ text = _("List cleared."), timeout = 2 })
+                    
+                    -- Close pool story list if open, return to main menu
+                    if self.reader and self.reader.current_menu_info and self.reader.current_menu_info.menu then
+                        local menu = self.reader.current_menu_info.menu
+                        if menu._rss_feed_node and menu._rss_feed_node.kind == "pool" then
+                            UIManager:close(menu)
+                            self.reader.current_menu_info = nil
+                        end
+                    end
+                end,
+            },
+        }},
+    }
+    UIManager:show(confirm_dialog)
+end
+
+function MenuBuilder:poolSaveAll()
+    local stories = Pool.getStories()
+    if #stories == 0 then
+        UIManager:show(InfoMessage:new{ text = _("List is empty."), timeout = 3 })
+        return
+    end
+
+    local total = #stories
+    local current = 0
+    local cancelled = false
+    local progress_widget
+
+    local function showProgress(idx, title)
+        if progress_widget then
+            progress_widget.dismiss_callback = nil
+            UIManager:close(progress_widget)
+            progress_widget = nil
+        end
+        local text = string.format(_("Saving %d of %d...\n%s\n\nTap outside to cancel."), idx, total, title or "")
+        progress_widget = InfoMessage:new{
+            text = text,
+            timeout = nil,
+        }
+        progress_widget.dismiss_callback = function()
+            if not cancelled then
+                cancelled = true
+            end
+        end
+        UIManager:show(progress_widget)
+        UIManager:forceRePaint()
+    end
+
+    local function closeProgress()
+        if progress_widget then
+            progress_widget.dismiss_callback = nil
+            UIManager:close(progress_widget)
+            progress_widget = nil
+        end
+    end
+
+    local function saveNext()
+        if cancelled then
+            closeProgress()
+            UIManager:show(InfoMessage:new{
+                text = string.format(_("Cancelled. Saved %d of %d stories."), current, total),
+                timeout = 3,
+            })
+            self:refreshPoolMenu()
+            return
+        end
+
+        -- Re-read pool because indices shift after removal
+        local remaining = Pool.getStories()
+        if #remaining == 0 then
+            closeProgress()
+            UIManager:show(InfoMessage:new{
+                text = string.format(_("All %d stories saved successfully."), current),
+                timeout = 3,
+            })
+            if self.reader and self.reader.current_menu_info and self.reader.current_menu_info.menu then
+                UIManager:close(self.reader.current_menu_info.menu)
+                self.reader.current_menu_info = nil
+            end
+            if self.reader and type(self.reader.openAccountList) == "function" then
+                self.reader:openAccountList()
+            end
+            return
+        end
+
+        current = current + 1
+        local story = remaining[1]
+        local title = story.story_title or story.title or _("Untitled")
+        showProgress(current, title)
+
+        utils.normalizeStoryLink(story)
+        utils.fetchStoryContent(story, self, function(content, err, download_info)
+            if cancelled then
+                closeProgress()
+                UIManager:show(InfoMessage:new{
+                    text = string.format(_("Cancelled. Saved %d of %d stories."), current - 1, total),
+                    timeout = 3,
+                })
+                self:refreshPoolMenu()
+                return
+            end
+
+            if not content then
+                logger.warn("RSSReader Pool", "Failed to fetch content for", title)
+                -- Skip this story, move to next without removing
+                Pool.removeStory(1)
+                UIManager:scheduleIn(0.1, saveNext)
+                return
+            end
+
+            local directory = utils.determineSaveDirectory(self)
+            if not directory or directory == "" then
+                closeProgress()
+                UIManager:show(InfoMessage:new{ text = _("No target folder available."), timeout = 3 })
+                return
+            end
+            util.makePath(directory)
+
+            local filename = utils.safeFilenameFromStory(story)
+            local metadata = type(download_info) == "table" and download_info or {}
+            local include_images = metadata.images_requested and true or false
+            local html_for_epub = metadata.html_for_epub
+            local should_create_epub = include_images and type(html_for_epub) == "string" and html_for_epub ~= ""
+            local assets_root = metadata.assets_root or (metadata.assets and metadata.assets.assets_root)
+            local function cleanupAssets()
+                if assets_root then
+                    HtmlResources.cleanupAssets(assets_root)
+                    assets_root = nil
+                end
+            end
+
+            local saved = false
+            if should_create_epub and utils.EpubDownloadBackend then
+                local base_name = filename:gsub("%.html$", "")
+                local epub_path = utils.buildUniqueTargetPathWithExtension(directory, base_name, "epub")
+                local story_url = metadata.original_url or story.permalink or story.href or story.link or ""
+                local ok, result_or_err = pcall(function()
+                    return utils.EpubDownloadBackend:createEpub(epub_path, html_for_epub, story_url, include_images)
+                end)
+                saved = ok and result_or_err ~= false
+                if not saved then
+                    logger.warn("RSSReader Pool", "EPUB creation failed", result_or_err)
+                end
+            end
+
+            if not saved then
+                local target_path = utils.buildUniqueTargetPath(directory, filename)
+                local story_url_for_html = metadata.original_url or story.permalink or story.href or story.link or ""
+                saved = utils.writeStoryHtmlFile(content, target_path, utils.resolveStoryDocumentTitle(story), story_url_for_html)
+            end
+
+            cleanupAssets()
+
+            if saved then
+                Pool.removeStory(1)
+            end
+
+            UIManager:scheduleIn(0.1, saveNext)
+        end, { silent = true })
+    end
+
+    saveNext()
 end
 
 return MenuBuilder
