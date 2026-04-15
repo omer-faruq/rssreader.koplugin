@@ -2029,5 +2029,4 @@ function MenuBuilder:showLocalGroup(group, account_name)
     end)
 end
 
-
 return MenuBuilder

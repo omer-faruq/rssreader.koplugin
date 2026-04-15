@@ -17,6 +17,7 @@ local Screen = Device.screen
 
 local Accounts = require("rssreader_accounts")
 local MenuBuilder = require("rssreader_menu")
+local backends = require("rssreader_menu_backends")
 
 local FEED_STATE_MAX_AGE_SECONDS = 30 * 60
 
@@ -323,7 +324,7 @@ function RSSReader:restoreFreshRSSFeed(builder, account, feed_state)
     end  
   
     -- Show the restored feed  
-    builder:showFreshRSSFeed(account, client, feed_node, { reuse = true, menu_page = feed_state.menu_page })  
+    backends.showFreshRSSFeed(builder, account, client, feed_node, { reuse = true, menu_page = feed_state.menu_page })  
 end
 
 function RSSReader:restoreFeverFeed(builder, account, feed_state)
@@ -356,7 +357,7 @@ function RSSReader:restoreFeverFeed(builder, account, feed_state)
         end
     end
 
-    builder:showFeverFeed(account, client, feed_node, { reuse = true, menu_page = feed_state.menu_page })
+    backends.showFeverFeed(builder, account, client, feed_node, { reuse = true, menu_page = feed_state.menu_page })
 end
 
 function RSSReader:restoreLocalFeed(builder, account, feed_state)
@@ -461,7 +462,7 @@ function RSSReader:restoreNewsBlurFeed(builder, account, feed_state)
     end
 
     -- Show the restored feed
-    builder:showNewsBlurFeed(account, client, feed_node, { reuse = true, menu_page = feed_state.menu_page })
+    backends.showNewsBlurFeed(builder, account, client, feed_node, { reuse = true, menu_page = feed_state.menu_page })
 end
 
 function RSSReader:restoreCommaFeedFeed(builder, account, feed_state)
@@ -494,7 +495,7 @@ function RSSReader:restoreCommaFeedFeed(builder, account, feed_state)
     end
 
     -- Show the restored feed
-    builder:showCommaFeedFeed(account, client, feed_node, { reuse = true, menu_page = feed_state.menu_page })
+    backends.showCommaFeedFeed(builder, account, client, feed_node, { reuse = true, menu_page = feed_state.menu_page })
 end
 
 function RSSReader:getTapAction()
