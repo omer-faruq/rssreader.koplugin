@@ -57,6 +57,28 @@ function MenuBuilder:createTapCallback(stories, index, context)
             end
             self:handleStoryAction(stories, index, "save_story", { story = story }, context)
         end
+    elseif tap_action == "addtolist" then
+        return function()
+            local ok, err = Pool.addStory(story)
+            if ok then
+                UIManager:show(InfoMessage:new{ text = _("Added to List."), timeout = 1 })
+                utils.normalizeStoryReadState(story)
+                if utils.isUnread(story) then
+                    self:handleStoryAction(stories, index, "mark_read", story, context)
+                end
+                if context and type(context.refresh) == "function" then
+                    UIManager:scheduleIn(0.1, function()
+                        context.refresh()
+                    end)
+                end
+            elseif err == "duplicate" then
+                UIManager:show(InfoMessage:new{ text = _("Already in List."), timeout = 1 })
+            elseif err == "pool_full" then
+                UIManager:show(InfoMessage:new{ text = _("List is full."), timeout = 1 })
+            else
+                UIManager:show(InfoMessage:new{ text = _("Could not add to List."), timeout = 1 })
+            end
+        end
     else
         return function()
             self:showStory(stories, index, function(action, payload)
@@ -1769,6 +1791,17 @@ function MenuBuilder:showTapActionPopup()
                     UIManager:close(dialog)
                 end,
             }},
+            {{
+                text = current_action == "addtolist" and "✓ " .. _("Add to List") or _("Add to List"),
+                background = Blitbuffer.COLOR_WHITE,
+                align = "left",
+                callback = function()
+                    if reader and type(reader.setTapAction) == "function" then
+                        reader:setTapAction("addtolist")
+                    end
+                    UIManager:close(dialog)
+                end,
+            }},
         },
     }
     UIManager:show(dialog)
@@ -2154,6 +2187,14 @@ function MenuBuilder:showPoolStoryList()
                 end
                 self:handlePoolStoryAction(stories, index, "go_to_link", { story = story })
             end
+        elseif tap_action == "addtolist" then
+            tap_callback = function()
+                Pool.removeStory(index)
+                UIManager:show(InfoMessage:new{ text = _("Removed from List."), timeout = 1 })
+                UIManager:scheduleIn(0.1, function()
+                    self:refreshPoolMenu()
+                end)
+            end
         else
             tap_callback = function()
                 self:poolShowStoryPreview(stories, index)
@@ -2487,6 +2528,14 @@ function MenuBuilder:refreshPoolMenu()
                         story._rss_is_read = true
                     end
                     self:handlePoolStoryAction(stories, index, "go_to_link", { story = story })
+                end
+            elseif tap_action == "addtolist" then
+                tap_callback = function()
+                    Pool.removeStory(index)
+                    UIManager:show(InfoMessage:new{ text = _("Removed from List."), timeout = 1 })
+                    UIManager:scheduleIn(0.1, function()
+                        self:refreshPoolMenu()
+                    end)
                 end
             else
                 tap_callback = function()
