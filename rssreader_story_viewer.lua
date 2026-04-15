@@ -307,7 +307,7 @@ local function buildToolbarButtons(story, on_action, close_handler, include_clos
                     local pool_index = options.pool_index
                     if pool_index then
                         Pool.removeStory(pool_index)
-                        UIManager:show(InfoMessage:new{ text = _("Removed from List."), timeout = 2 })
+                        UIManager:show(InfoMessage:new{ text = _("Removed from List."), timeout = 1 })
                         if close_handler then
                             close_handler()
                         end
@@ -321,13 +321,17 @@ local function buildToolbarButtons(story, on_action, close_handler, include_clos
                 callback = function()
                     local ok, err = Pool.addStory(story)
                     if ok then
-                        UIManager:show(InfoMessage:new{ text = _("Added to List."), timeout = 2 })
+                        UIManager:show(InfoMessage:new{ text = _("Added to List."), timeout = 1 })
+                        -- Mark as read after adding to list (only if unread)
+                        if storyIsUnread(story) then
+                            on_action("mark_read", story)
+                        end
                     elseif err == "duplicate" then
-                        UIManager:show(InfoMessage:new{ text = _("Already in List."), timeout = 2 })
+                        UIManager:show(InfoMessage:new{ text = _("Already in List."), timeout = 1 })
                     elseif err == "pool_full" then
-                        UIManager:show(InfoMessage:new{ text = _("List is full."), timeout = 2 })
+                        UIManager:show(InfoMessage:new{ text = _("List is full."), timeout = 1 })
                     else
-                        UIManager:show(InfoMessage:new{ text = _("Could not add to List."), timeout = 2 })
+                        UIManager:show(InfoMessage:new{ text = _("Could not add to List."), timeout = 1 })
                     end
                 end,
             })

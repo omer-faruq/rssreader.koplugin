@@ -606,7 +606,10 @@ function utils.writeStoryHtmlFile(html, filepath, title, url)
     end
     file:write("<html><head><meta charset=\"utf-8\">")
     if type(title) == "string" and title ~= "" then
-        file:write("<title>" .. util.htmlEscape(title) .. "</title>")
+        local escaped_title = util.htmlEscape(title)
+        if escaped_title and escaped_title ~= "" then
+            file:write("<title>" .. escaped_title .. "</title>")
+        end
     end
     file:write("</head><body>")
     file:write(html or "")
@@ -626,12 +629,15 @@ function utils.wrapHtmlForEpub(html, title)
         return nil
     end
     local escaped_title = util.htmlEscape(title or "")
+    if not escaped_title or escaped_title == "" then
+        escaped_title = "Untitled"
+    end
     return table.concat({
         "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
         "<!DOCTYPE html>",
         "<html xmlns=\"http://www.w3.org/1999/xhtml\">",
         "<head><meta charset=\"utf-8\"/>",
-        escaped_title ~= "" and ("<title>" .. escaped_title .. "</title>") or "",
+        "<title>" .. escaped_title .. "</title>",
         "</head><body>",
         html,
         "</body></html>",

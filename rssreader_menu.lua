@@ -398,8 +398,9 @@ function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
                 local base_name = filename:gsub("%.html$", "")
                 local epub_path = utils.buildUniqueTargetPathWithExtension(directory, base_name, "epub")
                 local story_url = metadata.original_url or target_story.permalink or target_story.href or target_story.link or ""
+                local feed_title = target_story.feed_title or target_story.feedTitle
                 local ok, result_or_err = pcall(function()
-                    return utils.EpubDownloadBackend:createEpub(epub_path, html_for_epub, story_url, include_images)
+                    return utils.EpubDownloadBackend:createEpub(epub_path, html_for_epub, story_url, include_images, nil, nil, nil, feed_title)
                 end)
                 local success = ok and result_or_err ~= false
                 if success then
@@ -655,13 +656,20 @@ function MenuBuilder:createStoryLongPressMenu(stories, index, context, open_call
                 closeDialog()
                 local ok, err = Pool.addStory(story)
                 if ok then
-                    UIManager:show(InfoMessage:new{ text = _("Added to List."), timeout = 2 })
+                    UIManager:show(InfoMessage:new{ text = _("Added to List."), timeout = 1 })
+                    markStoryReadIfNeeded()
+                    -- Refresh list after a short delay to avoid timing conflict
+                    if context and type(context.refresh) == "function" then
+                        UIManager:scheduleIn(0.1, function()
+                            context.refresh()
+                        end)
+                    end
                 elseif err == "duplicate" then
-                    UIManager:show(InfoMessage:new{ text = _("Already in List."), timeout = 2 })
+                    UIManager:show(InfoMessage:new{ text = _("Already in List."), timeout = 1 })
                 elseif err == "pool_full" then
-                    UIManager:show(InfoMessage:new{ text = _("List is full."), timeout = 2 })
+                    UIManager:show(InfoMessage:new{ text = _("List is full."), timeout = 1 })
                 else
-                    UIManager:show(InfoMessage:new{ text = _("Could not add to List."), timeout = 2 })
+                    UIManager:show(InfoMessage:new{ text = _("Could not add to List."), timeout = 1 })
                 end
             end,
         },
@@ -2545,8 +2553,9 @@ function MenuBuilder:poolSaveSingleStory(story, pool_index)
             local base_name = filename:gsub("%.html$", "")
             local epub_path = utils.buildUniqueTargetPathWithExtension(directory, base_name, "epub")
             local story_url = metadata.original_url or story.permalink or story.href or story.link or ""
+            local feed_title = story.feed_title or story.feedTitle
             local ok, result_or_err = pcall(function()
-                return utils.EpubDownloadBackend:createEpub(epub_path, html_for_epub, story_url, include_images)
+                return utils.EpubDownloadBackend:createEpub(epub_path, html_for_epub, story_url, include_images, nil, nil, nil, feed_title)
             end)
             local success = ok and result_or_err ~= false
             if success then
@@ -2743,8 +2752,9 @@ function MenuBuilder:poolSaveAll()
                 local base_name = filename:gsub("%.html$", "")
                 local epub_path = utils.buildUniqueTargetPathWithExtension(directory, base_name, "epub")
                 local story_url = metadata.original_url or story.permalink or story.href or story.link or ""
+                local feed_title = story.feed_title or story.feedTitle
                 local ok, result_or_err = pcall(function()
-                    return utils.EpubDownloadBackend:createEpub(epub_path, html_for_epub, story_url, include_images)
+                    return utils.EpubDownloadBackend:createEpub(epub_path, html_for_epub, story_url, include_images, nil, nil, nil, feed_title)
                 end)
                 saved = ok and result_or_err ~= false
                 if not saved then

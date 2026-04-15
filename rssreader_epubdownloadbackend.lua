@@ -386,7 +386,7 @@ local ext_to_mimetype = {
     woff = "application/font-woff",
 }
 -- Create an epub file (with possibly images)
-function EpubDownloadBackend:createEpub(epub_path, html, url, include_images, message, filter_enable, filter_element)
+function EpubDownloadBackend:createEpub(epub_path, html, url, include_images, message, filter_enable, filter_element, author)
     logger.dbg("EpubDownloadBackend:createEpub(", epub_path, ")")
     if type(html) ~= "string" or html == "" then
         logger.warn("EpubDownloadBackend", "HTML content missing; aborting EPUB creation")
@@ -401,7 +401,16 @@ function EpubDownloadBackend:createEpub(epub_path, html, url, include_images, me
 
     local cancelled = false
     local page_htmltitle = html:match([[<title[^>]*>(.-)</title>]])
+    if not page_htmltitle or page_htmltitle == "" then
+        page_htmltitle = "Untitled"
+    end
     logger.dbg("page_htmltitle is ", page_htmltitle)
+    
+    local page_author = author
+    if not page_author or page_author == "" then
+        page_author = nil
+    end
+    logger.dbg("page_author is ", page_author)
 
     -- Rejigger HTML into XHTML to avoid unclosed elements. See <https://github.com/koreader/crengine/pull/370#issuecomment-910156921>.
     local cre = require("libs/libkoreader-cre")
@@ -573,13 +582,22 @@ function EpubDownloadBackend:createEpub(epub_path, html, url, include_images, me
         meta_cover = string.format([[<meta name="cover" content="%s"/>]], cover_imgid)
     end
     logger.dbg("meta_cover:", meta_cover)
+    
+    local author_meta = ""
+    if page_author then
+        local util = require("util")
+        local escaped_author = util.htmlEscape(page_author)
+        author_meta = string.format([[
+    <dc:creator>%s</dc:creator>]], escaped_author)
+    end
+    
     table.insert(content_opf_parts, string.format([[
 <?xml version='1.0' encoding='utf-8'?>
 <package xmlns="http://www.idpf.org/2007/opf"
         xmlns:dc="http://purl.org/dc/elements/1.1/"
         unique-identifier="bookid" version="2.0">
   <metadata>
-    <dc:title>%s</dc:title>
+    <dc:title>%s</dc:title>%s
     <dc:publisher>KOReader %s</dc:publisher>
     %s
   </metadata>
@@ -587,7 +605,7 @@ function EpubDownloadBackend:createEpub(epub_path, html, url, include_images, me
     <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
     <item id="content" href="content.html" media-type="application/xhtml+xml"/>
     <item id="css" href="stylesheet.css" media-type="text/css"/>
-]], page_htmltitle, Version:getCurrentRevision(), meta_cover))
+]], page_htmltitle, author_meta, Version:getCurrentRevision(), meta_cover))
     -- images files
     if include_images then
         for inum, img in ipairs(images) do
