@@ -72,6 +72,40 @@ NewsBlur, CommaFeed, Miniflux, and Fever API accounts include special virtual fe
 - **CommaFeed & Miniflux**: Virtual feeds support "Mark all as read" functionality. Long-press a virtual feed to mark all stories in that view as read.
 - **NewsBlur & Fever API**: Virtual feeds cannot be marked as read in bulk. Use individual feeds for "Mark all as read" functionality.
 
+## Reading List (Story Queue)
+The plugin includes a temporary reading list that lets you queue stories for later reading or batch saving:
+
+### Adding Stories to the List
+- **From story preview**: Tap **Add to List** in the toolbar
+- **From feed list**: Long-press any story → **Add to List**
+- Stories are automatically marked as read when added to the list
+- Maximum capacity: 500 stories
+- Duplicate detection: Stories already in the list won't be added again
+
+### Accessing the List
+- Open **RSS Reader** from the main menu
+- Tap **List** to view all queued stories
+- The list shows the number of stories currently queued
+
+### List Management
+- **Story List**: View all queued stories with read/unread indicators
+- **Save All**: Download all stories in the list to your designated save folder
+  - Progress dialog shows current status
+  - Tap outside the progress dialog to cancel
+  - Successfully saved stories are automatically removed from the list
+- **Clear List**: Remove all stories from the list at once
+- **Remove Individual Stories**: Long-press any story in the list → **Remove from list**
+
+### Navigation Behavior
+- When you open a story from the list and return to RSS Reader, you're taken back to the pool story list at your last position
+- This mirrors the behavior of normal feed story lists for a consistent experience
+
+### Tap Actions in the List
+The tap action setting also applies to stories in the reading list:
+- **Show preview** – Opens the story preview screen
+- **Open directly** – Opens the story immediately
+- **Save only** – Downloads the story to your save folder and removes it from the list
+
 ## Tap Action on Feed Items
 Configure what happens when you tap a story in the feed list:
 - Open **RSS Reader** → **Settings** → **Tap action on feed items**
@@ -79,7 +113,7 @@ Configure what happens when you tap a story in the feed list:
   - **Show preview** (default) – Opens the story preview screen
   - **Open directly** – Downloads and opens the story immediately
   - **Save only** – Downloads the story without opening it
-- The setting applies to all account types (local, NewsBlur, CommaFeed, FreshRSS)
+- The setting applies to all account types (local, NewsBlur, CommaFeed, FreshRSS) and the reading list
 
 ## Image Download Settings
 The `features` block in `rssreader_configuration.lua` controls how the plugin fetches and displays article images. Three switches let you balance visual richness with bandwidth and storage:
