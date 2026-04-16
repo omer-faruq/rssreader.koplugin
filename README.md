@@ -109,10 +109,11 @@ The tap action setting also applies to stories in the reading list:
 ## Tap Action on Feed Items
 Configure what happens when you tap a story in the feed list:
 - Open **RSS Reader** → **Settings** → **Tap action on feed items**
-- Choose one of three modes:
+- Choose one of four modes:
   - **Show preview** (default) – Opens the story preview screen
   - **Open directly** – Downloads and opens the story immediately
   - **Save only** – Downloads the story without opening it
+  - **Add to list** – Adds the story to the reading list
 - The setting applies to all account types (local, NewsBlur, CommaFeed, FreshRSS) and the reading list
 
 ## Image Download Settings
