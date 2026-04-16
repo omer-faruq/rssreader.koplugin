@@ -740,8 +740,16 @@ function MenuBuilder:createStoryLongPressMenu(stories, index, context, open_call
     })
 
     local menu_title = story.story_title or story.title or _("Story")
+    local date_str = utils.formatStoryDate(story, true)
+    
     if (story._from_virtual_feed or story._is_from_virtual_feed) and story.feed_title and story.feed_title ~= "" then
-        menu_title = string.format("%s\n[%s]", menu_title, story.feed_title)
+        if date_str then
+            menu_title = string.format("%s\n[%s] • %s", menu_title, story.feed_title, date_str)
+        else
+            menu_title = string.format("%s\n[%s]", menu_title, story.feed_title)
+        end
+    elseif date_str then
+        menu_title = string.format("%s\n%s", menu_title, date_str)
     end
     
     local snippet = utils.storySnippet(story, 500)
@@ -2475,6 +2483,18 @@ function MenuBuilder:poolStoryLongPress(stories, index)
     })
 
     local menu_title = story.story_title or story.title or _("Story")
+    local date_str = utils.formatStoryDate(story, true)
+    
+    if (story._from_virtual_feed or story._is_from_virtual_feed) and story.feed_title and story.feed_title ~= "" then
+        if date_str then
+            menu_title = string.format("%s\n[%s] • %s", menu_title, story.feed_title, date_str)
+        else
+            menu_title = string.format("%s\n[%s]", menu_title, story.feed_title)
+        end
+    elseif date_str then
+        menu_title = string.format("%s\n%s", menu_title, date_str)
+    end
+    
     local snippet = utils.storySnippet(story, 500)
     if snippet then
         menu_title = menu_title .. "\n" .. string.rep("─", 20) .. "\n" .. snippet

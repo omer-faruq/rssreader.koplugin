@@ -246,7 +246,7 @@ function utils.isUnread(story)
     return true
 end
 
-function utils.formatStoryDate(story)
+function utils.formatStoryDate(story, include_time)
     if type(story) ~= "table" then
         return nil
     end
@@ -268,7 +268,8 @@ function utils.formatStoryDate(story)
     if timestamp > 10000 then
         timestamp = timestamp / 1000
     end
-    local ok, formatted = pcall(os.date, "%Y-%m-%d", timestamp)
+    local format_string = include_time and "%Y-%m-%d %H:%M" or "%Y-%m-%d"
+    local ok, formatted = pcall(os.date, format_string, timestamp)
     if ok then
         return formatted
     end
