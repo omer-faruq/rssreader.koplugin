@@ -18,7 +18,9 @@ local HtmlResources = require("rssreader_html_resources")
 local FiveFiltersSanitizer = require("sanitizers/rssreader_sanitizer_fivefilters")
 local DiffbotSanitizer = require("sanitizers/rssreader_sanitizer_diffbot")
 local InstaparserSanitizer = require("sanitizers/rssreader_sanitizer_instaparser")
+local Trapper = require("ui/trapper")
 local sha2 = require("ffi/sha2")
+local T = require("ffi/util").template
 
 local utils = {}
 
@@ -755,7 +757,9 @@ end
 
 function utils.fetchViaHttp(link, on_complete)
     local sink = {}
-    socketutil:set_timeout(socketutil.LARGE_BLOCK_TIMEOUT, socketutil.LARGE_TOTAL_TIMEOUT)
+    -- Slightly tighter than socketutil.LARGE_* (10/30) so a single slow article
+    -- or sanitizer endpoint cannot block the UI for half a minute.
+    socketutil:set_timeout(8, 20)
     local ok, status_code, _, status_text = http.request{
         url = link,
         method = "GET",
@@ -797,10 +801,9 @@ function utils.fetchStoryContent(story, builder, on_complete, options)
         return
     end
 
-    local silent = options and options.silent
-    if not silent then
-        UIManager:show(InfoMessage:new{ text = _("Downloading article..."), timeout = 1 })
-    end
+    options = options or {}
+    local silent = options.silent
+    local external_progress_cb = options.progress_callback
 
     NetworkMgr:runWhenOnline(function()
         UIManager:nextTick(function()
@@ -809,11 +812,143 @@ function utils.fetchStoryContent(story, builder, on_complete, options)
                 configured_sanitizers = { { type = "fivefilters" } }
             end
 
-            local function finalizeContent(raw_html, sanitized_successful)
-                if not raw_html then
-                    if on_complete then
-                        on_complete(nil, "empty_content")
+            -- Cancellation flag shared across all phases. It is flipped
+            -- either when the user taps the progress widget (single-tap
+            -- cancel, no confirm dialog — matches poolSaveAll / Fetch
+            -- missing info convention) or when an external progress
+            -- callback signals cancel.
+            local cancelled = false
+            local completed = false
+
+            -- Custom progress-widget plumbing. We intentionally do NOT
+            -- use Trapper:info here: Trapper requires a ConfirmBox
+            -- (Abort/Continue) on dismiss, but the rest of the plugin
+            -- treats a single tap as immediate cancel. We still run
+            -- inside a Trapper:wrap coroutine (`co`) so we can briefly
+            -- yield between images; that yield is what lets UIManager
+            -- dispatch queued taps to our widget.
+            local co -- captured once Trapper:wrap enters its coroutine
+            local progress_widget
+            local pending_resume -- resumer currently scheduled on UIManager
+
+            local function cancelPendingResume()
+                if pending_resume then
+                    UIManager:unschedule(pending_resume)
+                    pending_resume = nil
+                end
+            end
+
+            local function resumeCoroutine(value)
+                if not co then return end
+                if coroutine.status(co) ~= "suspended" then return end
+                cancelPendingResume()
+                coroutine.resume(co, value)
+            end
+
+            local function closeProgressWidget()
+                if progress_widget then
+                    -- Clear dismiss_callback first so that UIManager:close
+                    -- doesn't trigger it (which would flip `cancelled`).
+                    progress_widget.dismiss_callback = nil
+                    UIManager:close(progress_widget)
+                    progress_widget = nil
+                end
+            end
+
+            local function onWidgetDismissed()
+                if cancelled then return end
+                cancelled = true
+                -- If the coroutine is currently yielded (e.g. in
+                -- yieldToUI between images), wake it up so the loop
+                -- can notice the flag and bail out.
+                resumeCoroutine(false)
+            end
+
+            local function showProgress(text)
+                if cancelled then return false end
+                if silent then return true end
+                -- Always replace the widget: InfoMessage does not
+                -- gracefully re-layout when text changes width, and
+                -- UIManager:close + :show is what the poolSaveAll
+                -- progress pattern in rssreader_menu.lua does too.
+                -- We deliberately do NOT set flush_events_on_show so
+                -- Input:inhibitInputUntil is not triggered (no 800 ms
+                -- sensor-deaf window on e-ink).
+                closeProgressWidget()
+                progress_widget = InfoMessage:new{
+                    text = text,
+                    timeout = nil,
+                }
+                progress_widget.dismiss_callback = onWidgetDismissed
+                UIManager:show(progress_widget)
+                UIManager:forceRePaint()
+                return true
+            end
+
+            local function yieldToUI(delay_s)
+                -- Give UIManager a turn so any tap that was queued
+                -- during the previous blocking http.request can be
+                -- dispatched to progress_widget.dismiss_callback.
+                if cancelled then return false end
+                if silent or not co then return true end
+                local resume_func
+                resume_func = function()
+                    pending_resume = nil
+                    if coroutine.status(co) == "suspended" then
+                        coroutine.resume(co, true)
                     end
+                end
+                pending_resume = resume_func
+                UIManager:scheduleIn(delay_s or 0.1, resume_func)
+                local ok = coroutine.yield()
+                cancelPendingResume()
+                return ok ~= false
+            end
+
+            local function safeComplete(content, err, info)
+                if completed then return end
+                completed = true
+                if not silent then
+                    -- Tear down the progress widget before yielding
+                    -- control back to the caller. Otherwise on_complete
+                    -- may show its own InfoMessage on top of ours.
+                    closeProgressWidget()
+                end
+                if on_complete then
+                    on_complete(content, err, info)
+                end
+            end
+
+            local function imageProgressCallback(inum, total)
+                -- Called by HtmlResources.downloadAndRewrite right
+                -- before each image download. Returning false aborts
+                -- the remaining downloads.
+                if cancelled then return false end
+                if external_progress_cb then
+                    local ok = external_progress_cb(inum, total)
+                    if ok == false then
+                        cancelled = true
+                        return false
+                    end
+                end
+                if not silent then
+                    showProgress(T(_("Downloading image %1 / %2 …"), inum, total))
+                    -- Briefly yield so UIManager can deliver any tap
+                    -- queued during the previous image's http.request.
+                    if not yieldToUI(0.05) then
+                        return false
+                    end
+                end
+                return true
+            end
+
+            local function finalizeContent(raw_html, sanitized_successful)
+                if cancelled then
+                    safeComplete(nil, "cancelled")
+                    return
+                end
+                if not raw_html then
+                    safeComplete(nil, "empty_content")
                     return
                 end
 
@@ -826,16 +961,18 @@ function utils.fetchStoryContent(story, builder, on_complete, options)
                     raw_html = heading .. raw_html
                 end
 
-                local html_for_epub = raw_html
-
                 local download_info
                 local images_requested = utils.shouldDownloadImages(builder, sanitized_successful)
+                local local_assets_map -- maps rewritten relative src -> absolute file path
                 if images_requested then
-                    local asset_base_dir = options and options.asset_base_dir or utils.buildCacheDirectory()
-                    local asset_base_name = options and options.asset_base_name or string.format("story_%d", os.time())
+                    showProgress(_("Preparing images…"))
+                    local asset_base_dir = options.asset_base_dir or utils.buildCacheDirectory()
+                    local asset_base_name = options.asset_base_name or string.format("story_%d", os.time())
                     local asset_paths = HtmlResources.prepareAssetPaths(asset_base_dir, asset_base_name)
                     if asset_paths then
-                        local rewritten, assets = HtmlResources.downloadAndRewrite(raw_html, link, asset_paths)
+                        local rewritten, assets = HtmlResources.downloadAndRewrite(raw_html, link, asset_paths, {
+                            progress_callback = imageProgressCallback,
+                        })
                         if rewritten then
                             raw_html = rewritten
                         end
@@ -843,127 +980,186 @@ function utils.fetchStoryContent(story, builder, on_complete, options)
                         download_info.assets = assets
                         download_info.assets_root = assets and assets.assets_root
                         download_info.asset_paths = asset_paths
+                        if assets and assets.cancelled then
+                            cancelled = true
+                        end
+                        if assets and assets.downloads then
+                            local_assets_map = {}
+                            for _, d in ipairs(assets.downloads) do
+                                if d.relative_src and d.path then
+                                    local_assets_map[d.relative_src] = d.path
+                                end
+                            end
+                        end
                     else
                         logger.warn("RSSReader", "Failed to prepare asset directories for images")
                     end
                 end
 
-                local epub_document = utils.wrapHtmlForEpub(html_for_epub, utils.resolveStoryDocumentTitle(story))
+                if cancelled then
+                    safeComplete(nil, "cancelled", { assets_root = download_info and download_info.assets_root })
+                    return
+                end
+
+                -- Use the rewritten HTML (with local relative image paths) so the
+                -- EPUB backend can read images from disk via the local_assets map
+                -- instead of re-downloading them over the network.
+                local epub_document = utils.wrapHtmlForEpub(raw_html, utils.resolveStoryDocumentTitle(story))
 
                 download_info = download_info or {}
                 download_info.sanitized_successful = sanitized_successful and true or false
                 download_info.images_requested = images_requested and true or false
-                download_info.html_for_epub = epub_document or html_for_epub
+                download_info.html_for_epub = epub_document or raw_html
+                download_info.local_assets = local_assets_map
                 download_info.original_url = link
 
-                if on_complete then
-                    on_complete(raw_html, nil, download_info)
-                end
+                safeComplete(raw_html, nil, download_info)
             end
 
             local function handleOriginalDownload()
+                if cancelled then
+                    safeComplete(nil, "cancelled")
+                    return
+                end
+                showProgress(_("Downloading article…"))
                 utils.fetchViaHttp(link, function(content, err)
                     if not content then
-                        if on_complete then
-                            on_complete(nil, err)
-                        end
+                        safeComplete(nil, err)
                         return
                     end
                     finalizeContent(content, false)
                 end)
             end
 
-            if not configured_sanitizers or #configured_sanitizers == 0 then
-                handleOriginalDownload()
-                return
-            end
-
-            local function processSanitizer(index)
-                local sanitizer = configured_sanitizers[index]
-                if not sanitizer then
+            -- Run the actual work; called either directly (silent mode) or
+            -- inside a Trapper.wrap coroutine (interactive mode).
+            local function runWork()
+                if not configured_sanitizers or #configured_sanitizers == 0 then
                     handleOriginalDownload()
                     return
                 end
 
-                local sanitizer_type = sanitizer.type and sanitizer.type:lower() or ""
-                if sanitizer_type == "fivefilters" then
-                    local fivefilters_url = FiveFiltersSanitizer.buildUrl(link)
-                    if not fivefilters_url then
-                        processSanitizer(index + 1)
+                local function processSanitizer(index)
+                    if cancelled then
+                        safeComplete(nil, "cancelled")
+                        return
+                    end
+                    local sanitizer = configured_sanitizers[index]
+                    if not sanitizer then
+                        handleOriginalDownload()
                         return
                     end
 
-                    utils.fetchViaHttp(fivefilters_url, function(content, err)
-                        if not content then
+                    local sanitizer_type = sanitizer.type and sanitizer.type:lower() or ""
+                    local sanitizer_label = sanitizer_type
+                    if sanitizer_label == "" then sanitizer_label = "?" end
+                    showProgress(T(_("Trying sanitizer (%1)…"), sanitizer_label))
+
+                    if sanitizer_type == "fivefilters" then
+                        local fivefilters_url = FiveFiltersSanitizer.buildUrl(link)
+                        if not fivefilters_url then
                             processSanitizer(index + 1)
                             return
                         end
 
-                        if not FiveFiltersSanitizer.hasLikelyXmlStructure(content) then
+                        utils.fetchViaHttp(fivefilters_url, function(content, err)
+                            if cancelled then
+                                safeComplete(nil, "cancelled")
+                                return
+                            end
+                            if not content then
+                                processSanitizer(index + 1)
+                                return
+                            end
+
+                            if not FiveFiltersSanitizer.hasLikelyXmlStructure(content) then
+                                processSanitizer(index + 1)
+                                return
+                            end
+
+                            if FiveFiltersSanitizer.detectBlocked(content) then
+                                processSanitizer(index + 1)
+                                return
+                            end
+
+                            local fivefilters_html = FiveFiltersSanitizer.rewriteHtml(FiveFiltersSanitizer.extractHtml(content))
+                            if not fivefilters_html or not FiveFiltersSanitizer.contentIsMeaningful(fivefilters_html) then
+                                processSanitizer(index + 1)
+                                return
+                            end
+
+                            finalizeContent(fivefilters_html, true)
+                        end)
+                    elseif sanitizer_type == "diffbot" then
+                        local diffbot_url = DiffbotSanitizer.buildUrl(sanitizer, link)
+                        if not diffbot_url then
+                            logger.info("RSSReader", "Diffbot sanitizer misconfigured; skipping")
                             processSanitizer(index + 1)
                             return
                         end
 
-                        if FiveFiltersSanitizer.detectBlocked(content) then
-                            processSanitizer(index + 1)
-                            return
-                        end
+                        DiffbotSanitizer.fetchContent(diffbot_url, function(content, err)
+                            if cancelled then
+                                safeComplete(nil, "cancelled")
+                                return
+                            end
+                            if not content then
+                                processSanitizer(index + 1)
+                                return
+                            end
 
-                        local fivefilters_html = FiveFiltersSanitizer.rewriteHtml(FiveFiltersSanitizer.extractHtml(content))
-                        if not fivefilters_html or not FiveFiltersSanitizer.contentIsMeaningful(fivefilters_html) then
-                            processSanitizer(index + 1)
-                            return
-                        end
+                            local diffbot_html, diffbot_meta = DiffbotSanitizer.parseResponse(content)
+                            if type(diffbot_meta) == "table" then
+                                -- no-op; retained for compatibility, meta ignored currently
+                            end
+                            if not diffbot_html or not DiffbotSanitizer.contentIsMeaningful(diffbot_html) then
+                                processSanitizer(index + 1)
+                                return
+                            end
 
-                        finalizeContent(fivefilters_html, true)
-                    end)
-                elseif sanitizer_type == "diffbot" then
-                    local diffbot_url = DiffbotSanitizer.buildUrl(sanitizer, link)
-                    if not diffbot_url then
-                        logger.info("RSSReader", "Diffbot sanitizer misconfigured; skipping")
+                            finalizeContent(diffbot_html, true)
+                        end)
+                    elseif sanitizer_type == "instaparser" then
+                        InstaparserSanitizer.fetchArticle(sanitizer, link, function(content, err)
+                            if cancelled then
+                                safeComplete(nil, "cancelled")
+                                return
+                            end
+                            if not content then
+                                processSanitizer(index + 1)
+                                return
+                            end
+
+                            local instaparser_html = InstaparserSanitizer.parseResponse(content)
+                            if not instaparser_html or not InstaparserSanitizer.contentIsMeaningful(instaparser_html) then
+                                processSanitizer(index + 1)
+                                return
+                            end
+
+                            finalizeContent(instaparser_html, true)
+                        end)
+                    else
+                        logger.info("RSSReader", "Unknown sanitizer type", sanitizer.type)
                         processSanitizer(index + 1)
-                        return
                     end
-
-                    DiffbotSanitizer.fetchContent(diffbot_url, function(content, err)
-                        if not content then
-                            processSanitizer(index + 1)
-                            return
-                        end
-
-                        local diffbot_html, diffbot_meta = DiffbotSanitizer.parseResponse(content)
-                        if type(diffbot_meta) == "table" then
-                            -- no-op; retained for compatibility, meta ignored currently
-                        end
-                        if not diffbot_html or not DiffbotSanitizer.contentIsMeaningful(diffbot_html) then
-                            processSanitizer(index + 1)
-                            return
-                        end
-
-                        finalizeContent(diffbot_html, true)
-                    end)
-                elseif sanitizer_type == "instaparser" then
-                    InstaparserSanitizer.fetchArticle(sanitizer, link, function(content, err)
-                        if not content then
-                            processSanitizer(index + 1)
-                            return
-                        end
-
-                        local instaparser_html = InstaparserSanitizer.parseResponse(content)
-                        if not instaparser_html or not InstaparserSanitizer.contentIsMeaningful(instaparser_html) then
-                            processSanitizer(index + 1)
-                            return
-                        end
-
-                        finalizeContent(instaparser_html, true)
-                    end)
-                else
-                    logger.info("RSSReader", "Unknown sanitizer type", sanitizer.type)
-                    processSanitizer(index + 1)
                 end
+
+                processSanitizer(1)
             end
 
-            processSanitizer(1)
+            if silent then
+                runWork()
+            else
+                Trapper:wrap(function()
+                    -- Capture the running coroutine so yieldToUI and
+                    -- onWidgetDismissed (tap → cancel) can drive it.
+                    co = coroutine.running()
+                    runWork()
+                    -- Belt-and-braces: make sure no progress widget
+                    -- remains on screen after the final callback ran.
+                    closeProgressWidget()
+                end)
+            end
         end)
     end)
 end

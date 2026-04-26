@@ -76,8 +76,9 @@ end
 
 function DiffbotSanitizer.fetchContent(diffbot_url, on_complete)
     local sink = {}
-    --socketutil:set_timeout(socketutil.LARGE_BLOCK_TIMEOUT, socketutil.LARGE_TOTAL_TIMEOUT)
-    socketutil:set_timeout(30, 60)
+    -- Keep timeouts modest so a slow sanitizer doesn't stall fetchStoryContent
+    -- for tens of seconds; the original article fetch can still be tried as fallback.
+    socketutil:set_timeout(8, 15)
     local ok, status_code, _, status_text = http.request{
         url = diffbot_url,
         method = "GET",

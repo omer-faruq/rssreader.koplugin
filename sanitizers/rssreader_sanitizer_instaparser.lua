@@ -59,7 +59,9 @@ function InstaparserSanitizer.fetchArticle(sanitizer, link, on_complete)
     end
 
     local sink = {}
-    socketutil:set_timeout(30, 60)
+    -- Keep timeouts modest so a slow sanitizer doesn't stall fetchStoryContent
+    -- for tens of seconds; the original article fetch can still be tried as fallback.
+    socketutil:set_timeout(8, 15)
     local ok, status_code, _, status_text = http.request{
         url = endpoint,
         method = "POST",

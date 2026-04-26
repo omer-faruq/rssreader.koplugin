@@ -421,8 +421,9 @@ function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
                 local epub_path = utils.buildUniqueTargetPathWithExtension(directory, base_name, "epub")
                 local story_url = metadata.original_url or target_story.permalink or target_story.href or target_story.link or ""
                 local feed_title = target_story.feed_title or target_story.feedTitle
+                local local_assets = metadata.local_assets
                 local ok, result_or_err = pcall(function()
-                    return utils.EpubDownloadBackend:createEpub(epub_path, html_for_epub, story_url, include_images, nil, nil, nil, feed_title)
+                    return utils.EpubDownloadBackend:createEpub(epub_path, html_for_epub, story_url, include_images, nil, nil, nil, feed_title, local_assets)
                 end)
                 local success = ok and result_or_err ~= false
                 if success then
@@ -2621,8 +2622,9 @@ function MenuBuilder:poolSaveSingleStory(story, pool_index)
             local epub_path = utils.buildUniqueTargetPathWithExtension(directory, base_name, "epub")
             local story_url = metadata.original_url or story.permalink or story.href or story.link or ""
             local feed_title = story.feed_title or story.feedTitle
+            local local_assets = metadata.local_assets
             local ok, result_or_err = pcall(function()
-                return utils.EpubDownloadBackend:createEpub(epub_path, html_for_epub, story_url, include_images, nil, nil, nil, feed_title)
+                return utils.EpubDownloadBackend:createEpub(epub_path, html_for_epub, story_url, include_images, nil, nil, nil, feed_title, local_assets)
             end)
             local success = ok and result_or_err ~= false
             if success then
@@ -2820,8 +2822,9 @@ function MenuBuilder:poolSaveAll()
                 local epub_path = utils.buildUniqueTargetPathWithExtension(directory, base_name, "epub")
                 local story_url = metadata.original_url or story.permalink or story.href or story.link or ""
                 local feed_title = story.feed_title or story.feedTitle
+                local local_assets = metadata.local_assets
                 local ok, result_or_err = pcall(function()
-                    return utils.EpubDownloadBackend:createEpub(epub_path, html_for_epub, story_url, include_images, nil, nil, nil, feed_title)
+                    return utils.EpubDownloadBackend:createEpub(epub_path, html_for_epub, story_url, include_images, nil, nil, nil, feed_title, local_assets)
                 end)
                 saved = ok and result_or_err ~= false
                 if not saved then

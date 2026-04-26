@@ -386,7 +386,11 @@ local ext_to_mimetype = {
     woff = "application/font-woff",
 }
 -- Create an epub file (with possibly images)
-function EpubDownloadBackend:createEpub(epub_path, html, url, include_images, message, filter_enable, filter_element, author)
+-- The optional `local_assets` table maps an image src (as it appears in `html`)
+-- to an absolute local file path. When a match is found, the image bytes are
+-- read from disk instead of being re-downloaded via HTTP. This lets callers
+-- that already have the images cached locally avoid the double download.
+function EpubDownloadBackend:createEpub(epub_path, html, url, include_images, message, filter_enable, filter_element, author, local_assets)
     logger.dbg("EpubDownloadBackend:createEpub(", epub_path, ")")
     if type(html) ~= "string" or html == "" then
         logger.warn("EpubDownloadBackend", "HTML content missing; aborting EPUB creation")
@@ -444,10 +448,15 @@ function EpubDownloadBackend:createEpub(epub_path, html, url, include_images, me
             logger.dbg("skipping data URI", src)
             return nil
         end
-        if src:sub(1,2) == "//" then
-            src = "https:" .. src -- Wikipedia redirects from http to https, so use https
-        elseif src:sub(1,1) == "/" then -- non absolute url
-            src = socket_url.absolute(base_url, src)
+        -- Check the original src against the local_assets map BEFORE any URL
+        -- transformations so callers can supply relative paths verbatim.
+        local local_path = local_assets and local_assets[src] or nil
+        if not local_path then
+            if src:sub(1,2) == "//" then
+                src = "https:" .. src -- Wikipedia redirects from http to https, so use https
+            elseif src:sub(1,1) == "/" then -- non absolute url
+                src = socket_url.absolute(base_url, src)
+            end
         end
         local cur_image
         if seen_images[src] then -- already seen
@@ -490,6 +499,7 @@ function EpubDownloadBackend:createEpub(epub_path, html, url, include_images, me
                 mimetype = mimetype,
                 width = width,
                 height = height,
+                local_path = local_path,
             }
             table.insert(images, cur_image)
             seen_images[src] = cur_image
@@ -708,13 +718,31 @@ function EpubDownloadBackend:createEpub(epub_path, html, url, include_images, me
             if use_img_2x and img.src2x then
                 src = img.src2x
             end
-            logger.dbg("Getting img ", src)
-            local success, content = getUrlContent(src)
-            -- success, content = getUrlContent(src..".unexistant") -- to simulate failure
-            if success then
-                logger.dbg("success, size:", #content)
+            local success, content
+            if img.local_path then
+                logger.dbg("Reading img from disk ", img.local_path)
+                local f = io.open(img.local_path, "rb")
+                if f then
+                    content = f:read("*a")
+                    f:close()
+                    success = content ~= nil and #content > 0
+                else
+                    success = false
+                end
+                if success then
+                    logger.dbg("local read success, size:", #content)
+                else
+                    logger.info("failed reading local image:", img.local_path)
+                end
             else
-                logger.info("failed fetching:", src)
+                logger.dbg("Getting img ", src)
+                success, content = getUrlContent(src)
+                -- success, content = getUrlContent(src..".unexistant") -- to simulate failure
+                if success then
+                    logger.dbg("success, size:", #content)
+                else
+                    logger.info("failed fetching:", src)
+                end
             end
             if success then
                 -- Images do not need to be compressed, so spare some cpu cycles
