@@ -38,6 +38,7 @@ function RSSReader:init()
     self.state_file = DataStorage:getSettingsDir() .. "/rssreader_state.json"
     self:onDispatcherRegisterActions()
     self.ui.menu:registerToMainMenu(self)
+    self:addLinkDialogButtons()
 end
 
 function RSSReader:getStateFilePath()
@@ -766,6 +767,52 @@ function RSSReader:openAccount(account)
     end
     local builder = MenuBuilder:new{ accounts = self.accounts, reader = self }
     builder:openAccount(self, account)
+end
+
+function RSSReader:addLinkDialogButtons()
+    if not (self.ui and self.ui.link and self.ui.link.addToExternalLinkDialog) then
+        return
+    end
+    
+    local utils = require("rssreader_menu_utils")
+    local builder = MenuBuilder:new{ accounts = self.accounts, reader = self }
+    
+    self.ui.link:addToExternalLinkDialog("70_open_sanitized_rssreader", function(external_dialog, link_url)
+        return {
+            text = _("Open Sanitized"),
+            background = Blitbuffer.COLOR_WHITE,
+            callback = function()
+                UIManager:close(external_dialog)
+                utils.openSanitizedLink(link_url, builder, function(path, err)
+                    if err then
+                        UIManager:show(InfoMessage:new{
+                            text = string.format(_("Failed to open link: %s"), err),
+                        })
+                    end
+                end)
+            end,
+            show_in_dialog_func = function()
+                return G_reader_settings:nilOrTrue("rssreader_link_popup_show_open_sanitized")
+            end,
+        }
+    end)
+    
+    self.ui.link:addToExternalLinkDialog("71_save_sanitized_rssreader", function(external_dialog, link_url)
+        local show_save = G_reader_settings:readSetting("rssreader_link_popup_show_save_sanitized")
+        if show_save == nil then show_save = true end
+        
+        return {
+            text = _("Save Sanitized"),
+            background = Blitbuffer.COLOR_WHITE,
+            callback = function()
+                UIManager:close(external_dialog)
+                utils.saveSanitizedLink(link_url, builder)
+            end,
+            show_in_dialog_func = function()
+                return show_save
+            end,
+        }
+    end)
 end
 
 return RSSReader

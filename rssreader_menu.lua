@@ -1698,6 +1698,15 @@ function MenuBuilder:showSettingsPopup()
                 end,
             }},
             {{
+                text = _("Link popup"),
+                background = Blitbuffer.COLOR_WHITE,
+                align = "left",
+                callback = function()
+                    UIManager:close(dialog)
+                    self:showLinkPopupSettings()
+                end,
+            }},
+            {{
                 text = show_newsblur_all and "✓ " .. _("Show NewsBlur 'All Feeds'") or _("Show NewsBlur 'All Feeds'"),
                 background = Blitbuffer.COLOR_WHITE,
                 align = "left",
@@ -1854,6 +1863,39 @@ function MenuBuilder:showListViewPopup()
                         reader:setListViewMode("magazine")
                     end
                     UIManager:close(dialog)
+                end,
+            }},
+        },
+    }
+    UIManager:show(dialog)
+end
+
+function MenuBuilder:showLinkPopupSettings()
+    local show_open = G_reader_settings:nilOrTrue("rssreader_link_popup_show_open_sanitized")
+    local show_save = G_reader_settings:nilOrTrue("rssreader_link_popup_show_save_sanitized")
+    
+    local dialog
+    dialog = ButtonDialog:new{
+        title = _("Link popup"),
+        buttons = {
+            {{
+                text = (show_open and "✓ " or "") .. _("Show 'Open Sanitized' button"),
+                background = Blitbuffer.COLOR_WHITE,
+                align = "left",
+                callback = function()
+                    UIManager:close(dialog)
+                    G_reader_settings:saveSetting("rssreader_link_popup_show_open_sanitized", not show_open)
+                    self:showLinkPopupSettings()
+                end,
+            }},
+            {{
+                text = (show_save and "✓ " or "") .. _("Show 'Save Sanitized' button"),
+                background = Blitbuffer.COLOR_WHITE,
+                align = "left",
+                callback = function()
+                    UIManager:close(dialog)
+                    G_reader_settings:saveSetting("rssreader_link_popup_show_save_sanitized", not show_save)
+                    self:showLinkPopupSettings()
                 end,
             }},
         },

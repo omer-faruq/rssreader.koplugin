@@ -955,10 +955,12 @@ function utils.fetchStoryContent(story, builder, on_complete, options)
                 raw_html = utils.rewriteRelativeResourceUrls(raw_html, link)
                 raw_html = HtmlSanitizer.disableFontSizeDeclarations(raw_html)
 
-                local title = utils.resolveStoryDocumentTitle(story)
-                if type(raw_html) == "string" and raw_html ~= "" and type(title) == "string" and title ~= "" then
-                    local heading = string.format("<h3>%s</h3>", util.htmlEscape(title))
-                    raw_html = heading .. raw_html
+                if not options.skip_title_heading then
+                    local title = utils.resolveStoryDocumentTitle(story)
+                    if type(raw_html) == "string" and raw_html ~= "" and type(title) == "string" and title ~= "" then
+                        local heading = string.format("<h3>%s</h3>", util.htmlEscape(title))
+                        raw_html = heading .. raw_html
+                    end
                 end
 
                 local download_info
@@ -1167,10 +1169,11 @@ end
 function utils.downloadStoryToCache(story, builder, on_complete)
     local cache_dir = utils.buildCacheDirectory()
     local filename = utils.safeFilenameFromStory(story)
-    local target_path = cache_dir .. "/" .. filename
     local base_name = filename:gsub("%.html$", "")
+    
+    local skip_heading = story and story._skip_title_heading
 
-    utils.fetchStoryContent(story, builder, function(content, err)
+    utils.fetchStoryContent(story, builder, function(content, err, info)
         if not content then
             if on_complete then
                 on_complete(nil, err)
@@ -1178,14 +1181,45 @@ function utils.downloadStoryToCache(story, builder, on_complete)
             return
         end
 
+        local page_title
+        local html_for_epub = info and info.html_for_epub
+        
+        if html_for_epub then
+            page_title = html_for_epub:match([[<title[^>]*>(.-)</title>]])
+            if page_title then
+                page_title = util.htmlToPlainTextIfHtml(page_title)
+            end
+        end
+        
+        if not page_title or page_title == "" then
+            page_title = content:match([[<title[^>]*>(.-)</title>]])
+            if page_title then
+                page_title = util.htmlToPlainTextIfHtml(page_title)
+            end
+        end
+        
+        if not page_title or page_title == "" then
+            page_title = utils.resolveStoryDocumentTitle(story)
+        end
+        
+        page_title = page_title:gsub("^%s+", ""):gsub("%s+$", "")
+        
+        local safe_title = page_title:gsub("[^%w%s%-_]", "_"):gsub("%s+", "_")
+        local title_filename = safe_title .. ".html"
+        local target_path = cache_dir .. "/" .. title_filename
+
         local story_url = story.permalink or story.href or story.link or ""
-        if not utils.writeStoryHtmlFile(content, target_path, utils.resolveStoryDocumentTitle(story), story_url) then
+        if not utils.writeStoryHtmlFile(content, target_path, page_title, story_url) then
             if on_complete then
                 on_complete(nil, "write_error")
             end
             return
         end
 
+        UIManager:show(InfoMessage:new{
+            text = string.format(_("Opening from RSS Reader cache:\n%s"), target_path),
+            timeout = 2,
+        })
         FileManager:openFile(target_path)
         if on_complete then
             on_complete(target_path)
@@ -1193,6 +1227,7 @@ function utils.downloadStoryToCache(story, builder, on_complete)
     end, {
         asset_base_dir = cache_dir,
         asset_base_name = base_name,
+        skip_title_heading = skip_heading,
     })
 end
 
@@ -1203,12 +1238,18 @@ function utils.determineSaveDirectory(builder)
             return predefined
         end
     end
-    if G_reader_settings then
-        local home_dir = G_reader_settings:readSetting("home_dir")
-        if type(home_dir) == "string" and home_dir ~= "" and util.pathExists(home_dir) then
-            return home_dir
-        end
+    
+    local home_dir = G_reader_settings and G_reader_settings:readSetting("home_dir")
+    if type(home_dir) == "string" and home_dir ~= "" and util.pathExists(home_dir) then
+        return home_dir
     end
+    
+    local Device = require("device")
+    local device_home = Device.home_dir
+    if type(device_home) == "string" and device_home ~= "" and util.pathExists(device_home) then
+        return device_home
+    end
+    
     local ui = builder.reader and builder.reader.ui
     if ui then
         local chooser_path = ui.file_chooser and ui.file_chooser.path
@@ -1222,6 +1263,7 @@ function utils.determineSaveDirectory(builder)
             end
         end
     end
+    
     return lfs.currentdir()
 end
 
@@ -1252,6 +1294,194 @@ function utils.triggerHoldCallback(_, item)
         item.hold_callback()
     end
     return true
+end
+
+function utils.openSanitizedLink(link, builder, on_complete)
+    if not link or link == "" then
+        if on_complete then
+            on_complete(nil, "missing_link")
+        end
+        return
+    end
+    
+    local fake_story = {
+        permalink = link,
+        href = link,
+        link = link,
+        title = link,
+        _skip_title_heading = true,
+    }
+    
+    NetworkMgr:runWhenOnline(function()
+        utils.downloadStoryToCache(fake_story, builder, on_complete)
+    end)
+end
+
+function utils.saveSanitizedLink(link, builder, on_complete)
+    if not link or link == "" then
+        if on_complete then
+            on_complete(nil, "missing_link")
+        end
+        return
+    end
+    
+    local fake_story = {
+        permalink = link,
+        href = link,
+        link = link,
+        title = link,
+    }
+    
+    NetworkMgr:runWhenOnline(function()
+        local save_dir = utils.determineSanitizedSaveDirectory(builder)
+        
+        UIManager:show(InfoMessage:new{
+            text = _("Downloading and sanitizing link..."),
+            timeout = 2,
+        })
+        
+        local filename = utils.safeFilenameFromStory(fake_story)
+        local base_name = filename:gsub("%.html$", "")
+        
+        local download_images = false
+        if builder.accounts and builder.accounts.config then
+            download_images = util.tableGetValue(builder.accounts.config, "features", "download_images_when_sanitize_successful")
+            if download_images == nil then download_images = true end
+        end
+        
+        utils.fetchStoryContent(fake_story, builder, function(content, err, info)
+            if not content then
+                UIManager:show(InfoMessage:new{
+                    text = string.format(_("Failed to download link: %s"), err or "unknown error"),
+                    timeout = 3,
+                })
+                if on_complete then
+                    on_complete(nil, err)
+                end
+                return
+            end
+            
+            local images_requested = download_images and (info and info.images_requested)
+            local html_for_epub = info and info.html_for_epub
+            local should_create_epub = images_requested and type(html_for_epub) == "string" and html_for_epub ~= ""
+            local local_assets = info and info.local_assets
+            
+            local page_title = content:match([[<title[^>]*>(.-)</title>]])
+            if page_title then
+                page_title = util.htmlToPlainTextIfHtml(page_title)
+            end
+            
+            local title_for_filename = page_title
+            if not title_for_filename or title_for_filename == "" then
+                title_for_filename = link
+            end
+            
+            title_for_filename = title_for_filename:gsub("^%s+", ""):gsub("%s+$", "")
+            
+            local safe_title = title_for_filename:gsub("[^%w%s%-_]", "_"):gsub("%s+", "_")
+            local title_filename = safe_title .. ".html"
+            
+            if page_title then
+                page_title = page_title:gsub("^%s+", ""):gsub("%s+$", "")
+            end
+            
+            if should_create_epub and utils.EpubDownloadBackend then
+                if html_for_epub and page_title and page_title ~= "" then
+                    local new_title_tag = "<title>" .. util.htmlEscape(page_title) .. "</title>"
+                    html_for_epub = html_for_epub:gsub("<title[^>]*>.-</title>", new_title_tag)
+                end
+                
+                local epub_path = utils.buildUniqueTargetPathWithExtension(save_dir, safe_title, "epub")
+                
+                local UI = require("ui/trapper")
+                UI:reset()
+                
+                local ok, result_or_err = pcall(function()
+                    return utils.EpubDownloadBackend:createEpub(
+                        epub_path,
+                        html_for_epub,
+                        link,
+                        true,
+                        "",
+                        false,
+                        nil,
+                        nil,
+                        local_assets
+                    )
+                end)
+                
+                UIManager:nextTick(function()
+                    UIManager:close(UIManager:getTopmostVisibleWidget())
+                    
+                    if ok and result_or_err then
+                        UIManager:show(InfoMessage:new{
+                            text = string.format(_("EPUB saved to:\n%s"), epub_path),
+                            timeout = 3,
+                        })
+                        if on_complete then
+                            on_complete(epub_path)
+                        end
+                    else
+                        UIManager:show(InfoMessage:new{
+                            text = string.format(_("Failed to create EPUB: %s"), tostring(result_or_err)),
+                            timeout = 3,
+                        })
+                        if on_complete then
+                            on_complete(nil, "epub_creation_failed")
+                        end
+                    end
+                end)
+            else
+                local target_path = utils.buildUniqueTargetPath(save_dir, title_filename)
+                
+                if not utils.writeStoryHtmlFile(content, target_path, page_title, link) then
+                    UIManager:show(InfoMessage:new{
+                        text = _("Failed to save HTML file"),
+                        timeout = 3,
+                    })
+                    if on_complete then
+                        on_complete(nil, "write_error")
+                    end
+                    return
+                end
+                
+                UIManager:show(InfoMessage:new{
+                    text = string.format(_("HTML saved to:\n%s"), target_path),
+                    timeout = 3,
+                })
+                if on_complete then
+                    on_complete(target_path)
+                end
+            end
+        end, {
+            silent = false,
+            skip_title_heading = true,
+        })
+    end)
+end
+
+function utils.determineSanitizedSaveDirectory(builder)
+    if builder.accounts and builder.accounts.config then
+        local sanitized_path = util.tableGetValue(builder.accounts.config, "features", "sanitized_save_path")
+        if type(sanitized_path) == "string" and sanitized_path ~= "" and util.pathExists(sanitized_path) then
+            return sanitized_path
+        end
+    end
+    
+    local home_dir = G_reader_settings and G_reader_settings:readSetting("home_dir")
+    if not home_dir or home_dir == "" then
+        local Device = require("device")
+        home_dir = Device.home_dir
+    end
+    if not home_dir or home_dir == "" then
+        local filemanagerutil = require("apps/filemanager/filemanagerutil")
+        home_dir = filemanagerutil.getDefaultDir()
+    end
+    if type(home_dir) == "string" and home_dir ~= "" and util.pathExists(home_dir) then
+        return home_dir
+    end
+    
+    return utils.determineSaveDirectory(builder)
 end
 
 return utils
