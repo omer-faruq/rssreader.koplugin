@@ -293,6 +293,8 @@ function RSSReader:restoreFeedState(account, feed_state)
         self:restoreFreshRSSFeed(builder, account, feed_state)
     elseif account.type == "fever" then
         self:restoreFeverFeed(builder, account, feed_state)
+    elseif account.type == "miniflux" then
+        self:restoreMinifluxFeed(builder, account, feed_state)
     elseif account.type == "local" then
         self:restoreLocalFeed(builder, account, feed_state)
     end
@@ -367,6 +369,42 @@ function RSSReader:restoreFeverFeed(builder, account, feed_state)
     end
 
     backends.showFeverFeed(builder, account, client, feed_node, { reuse = true, menu_page = feed_state.menu_page })
+end
+
+function RSSReader:restoreMinifluxFeed(builder, account, feed_state)  
+    if not self.accounts or type(self.accounts.getMinifluxClient) ~= "function" then  
+        return  
+    end  
+  
+    local client, err = self.accounts:getMinifluxClient(account)  
+    if not client then  
+        return  
+    end  
+  
+    -- Create a mock feed node with restored state  
+    local feed_node = {  
+        kind = "feed",  
+        id = feed_state.feed_id,  
+        title = feed_state.feed_title,  
+        _account_name = feed_state.account_name,  
+        _rss_stories = feed_state.stories,  
+        _rss_story_keys = {},  
+        _rss_page = feed_state.current_page,  
+        _rss_has_more = feed_state.has_more,  
+        _rss_menu_page = feed_state.menu_page,  
+        feed = { unreadCount = 0 }  
+    }  
+  
+    -- Rebuild story keys  
+    for _, story in ipairs(feed_state.stories or {}) do  
+        local key = story.story_hash or story.hash or story.guid or story.story_id or story.id  
+        if key then  
+            feed_node._rss_story_keys[key] = true  
+        end  
+    end  
+  
+    -- Show the restored feed  
+    backends.showMinifluxFeed(builder, account, client, feed_node, { reuse = true, menu_page = feed_state.menu_page })  
 end
 
 function RSSReader:restoreLocalFeed(builder, account, feed_state)
