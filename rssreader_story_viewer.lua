@@ -490,6 +490,7 @@ function StoryViewer:_showFallback(story, on_action, on_close, options)
         disable_story_mutators = options and options.disable_story_mutators,
         is_api_version = options and options.is_api_version,
         allow_mark_unread = options and options.allow_mark_unread,
+        allow_star = options and options.allow_star,
     }
     local buttons = on_action and buildToolbarButtons(story, on_action, closeViewer, false, button_options) or nil
 
@@ -677,6 +678,7 @@ function StoryViewer:showStory(story, on_action, on_close, options)
         disable_story_mutators = options and options.disable_story_mutators,
         is_api_version = options and options.is_api_version,
         allow_mark_unread = options and options.allow_mark_unread,
+        allow_star = options and options.allow_star,
     })
     local button_table = ButtonTable:new{
         width = width,
