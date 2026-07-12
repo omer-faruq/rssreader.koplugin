@@ -80,6 +80,15 @@ CommaFeed accounts support starring/unstarring individual articles, synced throu
 - A **★ Starred** virtual feed appears at the top of the root feed list, aggregating every starred article across your CommaFeed subscriptions
 - Not yet available for NewsBlur, FreshRSS, Miniflux, or Fever API accounts
 
+## Tags (CommaFeed)
+CommaFeed accounts support browsing and editing per-article tags:
+- A **★ Tags** virtual folder appears at the top of the root feed list, listing every tag you've used across your subscriptions
+- Tap a tag to view all stories carrying it, with the same pagination/read/star behavior as other virtual feeds
+- Long-press **★ Tags** → **Refresh tags** to force a re-fetch; the tag list is also refreshed automatically whenever you re-enter the account from the account list
+- Long-press a story → **Edit Tags** to set its tags as a comma-separated list (this replaces the story's existing tags)
+- A story's current tags, if any, are shown in its long-press popup
+- Not yet available for NewsBlur, FreshRSS, Miniflux, or Fever API accounts
+
 ## Reading List (Story Queue)
 The plugin includes a temporary reading list that lets you queue stories for later reading or batch saving:
 

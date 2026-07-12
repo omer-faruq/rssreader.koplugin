@@ -136,6 +136,7 @@ local function normalizeEntry(entry)
     end
     story.author = entry.author
     story.guid = entry.guid
+    story.tags = entry.tags or {}
     return story
 end
 
@@ -386,6 +387,13 @@ function CommaFeed:buildTree(force)
         _virtual = true,
         _read_filter = "all",
     })
+    table.insert(children, 4, {
+        kind = "folder",
+        id = "__commafeed_tags_root__",
+        title = "★ Tags",
+        _tags_root = true,
+        children = {},
+    })
 
     self.tree_cache = {
         kind = "root",
@@ -394,6 +402,43 @@ function CommaFeed:buildTree(force)
         feeds = feeds_map,
     }
     return true, self.tree_cache
+end
+
+function CommaFeed:fetchTags(force)
+    if self.tags_cache and not force then
+        return true, self.tags_cache
+    end
+    local ok, data_or_err = self:performRestRequest("GET", "/entry/tags")
+    if not ok then
+        return false, data_or_err
+    end
+    self.tags_cache = data_or_err
+    return true, data_or_err
+end
+
+function CommaFeed:getTagNode(tag_name, count)
+    self.tag_nodes = self.tag_nodes or {}
+    self.tag_lookup = self.tag_lookup or {}
+    local existing = self.tag_nodes[tag_name]
+    if existing then
+        if count ~= nil then
+            existing.feed = existing.feed or {}
+            existing.feed.unreadCount = count
+        end
+        return existing
+    end
+    local id = "__commafeed_tag__" .. tag_name
+    self.tag_lookup[id] = tag_name
+    local node = {
+        kind = "feed",
+        id = id,
+        title = tag_name,
+        _virtual = true,
+        _tag = true,
+        feed = { unreadCount = count or 0 },
+    }
+    self.tag_nodes[tag_name] = node
+    return node
 end
 
 function CommaFeed:resetPagination(feed_id)
@@ -410,8 +455,9 @@ function CommaFeed:fetchStories(feed_id, options)
 
     local is_virtual_all = feed_id == "__commafeed_all_feeds__" or feed_id == "__commafeed_all_unread__" or feed_id == "__commafeed_all_starred__"
     local is_category_virtual = feed_id:match("^__commafeed_category_")
+    local is_tag_virtual = feed_id:match("^__commafeed_tag__")
 
-    if is_virtual_all or is_category_virtual then
+    if is_virtual_all or is_category_virtual or is_tag_virtual then
         local page = (options and options.page) or 1
         if page < 1 then
             page = 1
@@ -422,6 +468,7 @@ function CommaFeed:fetchStories(feed_id, options)
 
         local read_type = "all"
         local category_id = "all"
+        local tag_name
 
         if feed_id == "__commafeed_all_unread__" then
             read_type = "unread"
@@ -434,6 +481,13 @@ function CommaFeed:fetchStories(feed_id, options)
         elseif feed_id:match("^__commafeed_category_all__") then
             read_type = "all"
             category_id = feed_id:gsub("^__commafeed_category_all__", "")
+        elseif is_tag_virtual then
+            read_type = "all"
+            category_id = "all"
+            tag_name = self.tag_lookup and self.tag_lookup[feed_id]
+            if not tag_name then
+                return false, "Unknown tag."
+            end
         end
 
         local query = {
@@ -442,6 +496,7 @@ function CommaFeed:fetchStories(feed_id, options)
             offset = offset,
             readType = read_type,
             order = "desc",
+            tag = tag_name,
         }
 
         local ok, data_or_err = self:performRestRequest("GET", "/category/entries", query)
@@ -564,6 +619,18 @@ end
 
 function CommaFeed:markStoryAsUnstarred(feed_id, story)
     return self:setStoryStarred(feed_id, story, false)
+end
+
+function CommaFeed:setEntryTags(story_id, tags)
+    local entry_id = toEntryIdValue(story_id)
+    if not entry_id then
+        return false, "Missing story identifier"
+    end
+    local payload = {
+        entryId = entry_id,
+        tags = tags or {},
+    }
+    return self:performRestRequest("POST", "/entry/tag", nil, payload)
 end
 
 function CommaFeed:markFeedAsRead(feed_id)

@@ -684,6 +684,10 @@ function backends.showCommaFeedAccount(self, account, opts)
         return
     end
 
+    if opts.force_refresh then
+        client.tags_cache = nil
+    end
+
     if not opts.force_refresh and client.tree_cache then
         backends.showCommaFeedNode(self, account, client, client.tree_cache)
         return
@@ -705,8 +709,49 @@ end
 function backends.showCommaFeedNode(self, account, client, node)
     local children = node and node.children or {}
     local entries = {}
-    for _, child in ipairs(children) do
-        if child.kind == "folder" then
+    for _child_index, child in ipairs(children) do
+        if child.kind == "folder" and child._tags_root then
+            local normal_callback = function()
+                backends.showCommaFeedTagsRoot(self, account, client, child)
+            end
+            table.insert(entries, {
+                text = child.title or _("Tags"),
+                callback = normal_callback,
+                hold_callback = function()
+                    local dialog
+                    dialog = ButtonDialog:new{
+                        title = child.title or _("Tags"),
+                        buttons = {{
+                            {
+                                text = _("Open"),
+                                background = Blitbuffer.COLOR_WHITE,
+                                callback = function()
+                                    UIManager:close(dialog)
+                                    normal_callback()
+                                end,
+                            },
+                            {
+                                text = _("Refresh tags"),
+                                background = Blitbuffer.COLOR_WHITE,
+                                callback = function()
+                                    UIManager:close(dialog)
+                                    backends.showCommaFeedTagsRoot(self, account, client, child, { force_refresh = true })
+                                end,
+                            },
+                            {
+                                text = _("Close"),
+                                background = Blitbuffer.COLOR_WHITE,
+                                callback = function()
+                                    UIManager:close(dialog)
+                                end,
+                            },
+                        }},
+                    }
+                    UIManager:show(dialog)
+                end,
+                hold_keep_menu_open = true,
+            })
+        elseif child.kind == "folder" then
             local normal_callback = function()
                 backends.showCommaFeedNode(self, account, client, child)
             end
@@ -760,6 +805,54 @@ function backends.showCommaFeedNode(self, account, client, node)
     if menu_instance then
         menu_instance.onMenuHold = utils.triggerHoldCallback
     end
+end
+
+function backends.showCommaFeedTagsRoot(self, account, client, node, opts)
+    opts = opts or {}
+    NetworkMgr:runWhenOnline(function()
+        local ok, tags_or_err = client:fetchTags(opts.force_refresh)
+        if not ok then
+            UIManager:show(InfoMessage:new{
+                text = tags_or_err or _("Failed to load tags."),
+            })
+            return
+        end
+
+        local entries = {}
+        for _, tag in ipairs(tags_or_err or {}) do
+            local name = type(tag) == "table" and (tag.name or tag.tag) or tostring(tag)
+            local count = type(tag) == "table" and (tag.count or tag.unreadCount) or nil
+            if name and name ~= "" then
+                local tag_node = client:getTagNode(name, count)
+                local normal_callback = function()
+                    backends.showCommaFeedFeed(self, account, client, tag_node)
+                end
+                local display_title = name
+                if count and count > 0 then
+                    display_title = display_title .. " (" .. tostring(count) .. ")"
+                end
+                table.insert(entries, {
+                    text = display_title,
+                    callback = normal_callback,
+                })
+            end
+        end
+
+        if #entries == 0 then
+            UIManager:show(InfoMessage:new{
+                text = _("No tags available."),
+            })
+            return
+        end
+
+        local menu_instance = Menu:new{
+            title = node and node.title or _("Tags"),
+            item_table = entries,
+        }
+        self:showMenu(menu_instance, function()
+            backends.showCommaFeedTagsRoot(self, account, client, node)
+        end)
+    end)
 end
 
 function backends.showCommaFeedFeed(self, account, client, feed_node, opts)

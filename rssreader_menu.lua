@@ -747,6 +747,19 @@ function MenuBuilder:createStoryLongPressMenu(stories, index, context, open_call
         })
     end
 
+    local has_tag_capability = context and context.client
+        and type(context.client.setEntryTags) == "function"
+    if has_tag_capability then
+        table.insert(add_to_list_row, {
+            text = _("Edit Tags"),
+            background = Blitbuffer.COLOR_WHITE,
+            callback = function()
+                closeDialog()
+                self:showTagEditDialog(stories, index, context)
+            end,
+        })
+    end
+
     table.insert(buttons, add_to_list_row)
 
     local mark_text
@@ -803,12 +816,16 @@ function MenuBuilder:createStoryLongPressMenu(stories, index, context, open_call
     elseif date_str then
         menu_title = string.format("%s\n%s", menu_title, date_str)
     end
-    
+
+    if type(story.tags) == "table" and #story.tags > 0 then
+        menu_title = string.format("%s\n%s: %s", menu_title, _("Tags"), table.concat(story.tags, ", "))
+    end
+
     local snippet = utils.storySnippet(story, 500)
     if snippet then
         menu_title = menu_title .. "\n" .. string.rep("─", 20) .. "\n" .. snippet
     end
-    
+
     dialog = ButtonDialog:new{
         title = menu_title,
         buttons = buttons,
@@ -816,6 +833,66 @@ function MenuBuilder:createStoryLongPressMenu(stories, index, context, open_call
 
     UIManager:show(dialog)
     return dialog
+end
+
+function MenuBuilder:showTagEditDialog(stories, index, context)
+    local story = stories and stories[index]
+    if not story or not context or not context.client or type(context.client.setEntryTags) ~= "function" then
+        return
+    end
+
+    local story_id = story.story_id or story.id
+    if not story_id then
+        UIManager:show(InfoMessage:new{ text = _("Missing story identifier."), timeout = 3 })
+        return
+    end
+
+    local current_text = table.concat(story.tags or {}, ", ")
+
+    local input_dialog
+    input_dialog = InputDialog:new{
+        title = _("Edit tags (comma separated)"),
+        input = current_text,
+        buttons = {{
+            {
+                text = _("Cancel"),
+                id = "close",
+                callback = function()
+                    UIManager:close(input_dialog)
+                end,
+            },
+            {
+                text = _("Save"),
+                is_enter_default = true,
+                callback = function()
+                    local text = input_dialog:getInputText() or ""
+                    UIManager:close(input_dialog)
+
+                    local tags = {}
+                    local seen = {}
+                    for part in text:gmatch("([^,]+)") do
+                        local trimmed = part:gsub("^%s+", ""):gsub("%s+$", "")
+                        if trimmed ~= "" and not seen[trimmed] then
+                            seen[trimmed] = true
+                            table.insert(tags, trimmed)
+                        end
+                    end
+
+                    NetworkMgr:runWhenOnline(function()
+                        local ok, err = context.client:setEntryTags(story_id, tags)
+                        if ok then
+                            story.tags = tags
+                            UIManager:show(InfoMessage:new{ text = _("Tags updated."), timeout = 2 })
+                        else
+                            UIManager:show(InfoMessage:new{ text = err or _("Failed to update tags."), timeout = 3 })
+                        end
+                    end)
+                end,
+            },
+        }},
+    }
+    UIManager:show(input_dialog)
+    input_dialog:onShowKeyboard()
 end
 
 function MenuBuilder:createLongPressMenuForLocalFeed(feed, account_name, normal_callback)
