@@ -28,6 +28,7 @@ CommaFeed offers the most comprehensive feature set for RSS reading on KOReader:
 - ✅ **Free tier available** – Use the official hosted service at [commafeed.com](https://www.commafeed.com) or self-host
 - ✅ **Full API support** – Mark as read, pagination, and all core features work seamlessly
 - ✅ **Starring** – Star/unstar articles, synced through CommaFeed's API
+- ✅ **Tags** – Browse articles by tag and edit a story's tags directly, synced through CommaFeed's API
 
 Other services like NewsBlur, FreshRSS, and Miniflux are fully supported with similar features. Miniflux provides native API support with folder/category organization and mark as read functionality.
 
