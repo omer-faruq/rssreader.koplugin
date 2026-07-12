@@ -132,6 +132,11 @@ function MenuBuilder:showStory(stories, index, on_action, on_close, options, con
             end
         end
     end
+    local allow_star = false
+    if context and context.client and type(context.client.markStoryAsStarred) == "function"
+        and type(context.client.markStoryAsUnstarred) == "function" then
+        allow_star = true
+    end
     local show_images_in_preview = false
     if self.accounts and self.accounts.config then
         local flag = util.tableGetValue(self.accounts.config, "features", "show_images_in_preview")
@@ -166,6 +171,7 @@ function MenuBuilder:showStory(stories, index, on_action, on_close, options, con
         disable_story_mutators = disable_mutators,
         is_api_version = is_api_context,
         allow_mark_unread = allow_mark_unread,
+        allow_star = allow_star,
         show_images_in_preview = show_images_in_preview,
     })
 end
@@ -375,6 +381,32 @@ function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
             end
             self:_updateStoryEntry(context, stories, index)
             self:_updateFeedCache(context)
+        end
+        return
+    end
+
+    if action == "mark_star" or action == "mark_unstar" then
+        if story then
+            local should_star = action == "mark_star"
+            local remote_feed_id = utils.resolveStoryFeedId(context, story)
+            if context and context.client and remote_feed_id
+                and type(context.client.markStoryAsStarred) == "function"
+                and type(context.client.markStoryAsUnstarred) == "function" then
+                NetworkMgr:runWhenOnline(function()
+                    local ok, err_or_data
+                    if should_star then
+                        ok, err_or_data = context.client:markStoryAsStarred(remote_feed_id, story)
+                    else
+                        ok, err_or_data = context.client:markStoryAsUnstarred(remote_feed_id, story)
+                    end
+                    if ok then
+                        utils.setStoryStarredState(story, should_star)
+                        self:_updateStoryEntry(context, stories, index)
+                    else
+                        UIManager:show(InfoMessage:new{ text = err_or_data or _("Failed to update star state."), timeout = 3 })
+                    end
+                end)
+            end
         end
         return
     end
@@ -671,7 +703,7 @@ function MenuBuilder:createStoryLongPressMenu(stories, index, context, open_call
         },
     }}
 
-    table.insert(buttons, {
+    local add_to_list_row = {
         {
             text = _("Add to List"),
             background = Blitbuffer.COLOR_WHITE,
@@ -696,7 +728,26 @@ function MenuBuilder:createStoryLongPressMenu(stories, index, context, open_call
                 end
             end,
         },
-    })
+    }
+
+    local has_star_capability = context and context.client
+        and type(context.client.markStoryAsStarred) == "function"
+        and type(context.client.markStoryAsUnstarred) == "function"
+    if has_star_capability then
+        local is_starred = utils.isStarred(story)
+        local star_text = is_starred and _("Unstar") or _("Star")
+        local star_action = is_starred and "mark_unstar" or "mark_star"
+        table.insert(add_to_list_row, {
+            text = star_text,
+            background = Blitbuffer.COLOR_WHITE,
+            callback = function()
+                closeDialog()
+                self:handleStoryAction(stories, index, star_action, story, context)
+            end,
+        })
+    end
+
+    table.insert(buttons, add_to_list_row)
 
     local mark_text
     local mark_action

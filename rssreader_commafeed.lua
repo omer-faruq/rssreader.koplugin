@@ -367,6 +367,13 @@ function CommaFeed:buildTree(force)
 
     table.insert(children, 1, {
         kind = "feed",
+        id = "__commafeed_all_starred__",
+        title = "★ Starred",
+        _virtual = true,
+        _read_filter = "starred",
+    })
+    table.insert(children, 1, {
+        kind = "feed",
         id = "__commafeed_all_unread__",
         title = "★ All Unread",
         _virtual = true,
@@ -401,9 +408,9 @@ function CommaFeed:fetchStories(feed_id, options)
         return false, "Missing feed identifier."
     end
 
-    local is_virtual_all = feed_id == "__commafeed_all_feeds__" or feed_id == "__commafeed_all_unread__"
+    local is_virtual_all = feed_id == "__commafeed_all_feeds__" or feed_id == "__commafeed_all_unread__" or feed_id == "__commafeed_all_starred__"
     local is_category_virtual = feed_id:match("^__commafeed_category_")
-    
+
     if is_virtual_all or is_category_virtual then
         local page = (options and options.page) or 1
         if page < 1 then
@@ -415,9 +422,12 @@ function CommaFeed:fetchStories(feed_id, options)
 
         local read_type = "all"
         local category_id = "all"
-        
+
         if feed_id == "__commafeed_all_unread__" then
             read_type = "unread"
+        elseif feed_id == "__commafeed_all_starred__" then
+            read_type = "all"
+            category_id = "starred"
         elseif feed_id:match("^__commafeed_category_unread__") then
             read_type = "unread"
             category_id = feed_id:gsub("^__commafeed_category_unread__", "")
@@ -524,6 +534,36 @@ function CommaFeed:markStoryAsUnread(feed_id, story)
         entryId = toEntryIdValue(story_id),
     }
     return self:performRestRequest("POST", "/entry/mark", nil, payload)
+end
+
+local function resolveEntryFeedId(feed_id, story)
+    local candidate = (type(story) == "table" and (story.feed_id or story.story_feed_id)) or feed_id
+    return toEntryIdValue(candidate)
+end
+
+function CommaFeed:setStoryStarred(feed_id, story, starred)
+    local story_id = extractStoryId(story)
+    if not story_id then
+        return false, "Missing story identifiers"
+    end
+    local entry_feed_id = resolveEntryFeedId(feed_id, story)
+    if not entry_feed_id then
+        return false, "Missing feed identifier"
+    end
+    local payload = {
+        id = story_id,
+        feedId = entry_feed_id,
+        starred = starred and true or false,
+    }
+    return self:performRestRequest("POST", "/entry/star", nil, payload)
+end
+
+function CommaFeed:markStoryAsStarred(feed_id, story)
+    return self:setStoryStarred(feed_id, story, true)
+end
+
+function CommaFeed:markStoryAsUnstarred(feed_id, story)
+    return self:setStoryStarred(feed_id, story, false)
 end
 
 function CommaFeed:markFeedAsRead(feed_id)

@@ -237,6 +237,20 @@ function utils.storyReadState(story)
     return nil
 end
 
+function utils.setStoryStarredState(story, is_starred)
+    if type(story) ~= "table" then
+        return
+    end
+    story.starred = is_starred and true or false
+end
+
+function utils.isStarred(story)
+    if type(story) ~= "table" then
+        return false
+    end
+    return story.starred == true
+end
+
 function utils.isUnread(story)
     if type(story) ~= "table" then
         return false
@@ -282,6 +296,9 @@ function utils.decoratedStoryTitle(story, decorate)
     local title = utils.replaceRightSingleQuoteEntities(story.story_title or story.title or _("Untitled story"))
     if decorate and utils.isUnread(story) then
         title = string.format("%s • %s", _("NEW"), title)
+    end
+    if utils.isStarred(story) then
+        title = "★ " .. title
     end
 
     if (story._from_virtual_feed or story._is_from_virtual_feed) and story.feed_title and story.feed_title ~= "" then

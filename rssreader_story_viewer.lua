@@ -288,6 +288,9 @@ local function buildToolbarButtons(story, on_action, close_handler, include_clos
         end
         local is_read = not storyIsUnread(story)
         local keep_unread_label = is_read and _("Mark as unread") or _("Keep unread")
+        local allow_star = options and options.allow_star or false
+        local is_starred = story.starred == true
+        local star_label = is_starred and _("Unstar") or _("Star")
         local first_row = {}
         if not disable_mutators and allow_mark_unread then
             table.insert(first_row, {
@@ -297,6 +300,15 @@ local function buildToolbarButtons(story, on_action, close_handler, include_clos
                     on_action("mark_unread", story)
                 end,
                 disabled = not allow_mark_unread,
+            })
+        end
+        if not disable_mutators and allow_star then
+            table.insert(first_row, {
+                text = star_label,
+                background = Blitbuffer.COLOR_WHITE,
+                callback = function()
+                    on_action(is_starred and "mark_unstar" or "mark_star", story)
+                end,
             })
         end
         if options and options.is_pool then

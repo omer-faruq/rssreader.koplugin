@@ -27,6 +27,7 @@ CommaFeed offers the most comprehensive feature set for RSS reading on KOReader:
 - ✅ **Category-level aggregation** – Each folder/category has its own "All Feeds" and "All Unread" views
 - ✅ **Free tier available** – Use the official hosted service at [commafeed.com](https://www.commafeed.com) or self-host
 - ✅ **Full API support** – Mark as read, pagination, and all core features work seamlessly
+- ✅ **Starring** – Star/unstar articles, synced through CommaFeed's API
 
 Other services like NewsBlur, FreshRSS, and Miniflux are fully supported with similar features. Miniflux provides native API support with folder/category organization and mark as read functionality.
 
@@ -71,6 +72,13 @@ NewsBlur, CommaFeed, Miniflux, and Fever API accounts include special virtual fe
 ### Mark All as Read for Virtual Feeds
 - **CommaFeed & Miniflux**: Virtual feeds support "Mark all as read" functionality. Long-press a virtual feed to mark all stories in that view as read.
 - **NewsBlur & Fever API**: Virtual feeds cannot be marked as read in bulk. Use individual feeds for "Mark all as read" functionality.
+
+## Starring Articles (CommaFeed)
+CommaFeed accounts support starring/unstarring individual articles, synced through CommaFeed's API:
+- Long-press a story → **Star** / **Unstar** (next to **Add to List**), or use the star button in the story preview toolbar
+- Starred stories show a ★ prefix in the title
+- A **★ Starred** virtual feed appears at the top of the root feed list, aggregating every starred article across your CommaFeed subscriptions
+- Not yet available for NewsBlur, FreshRSS, Miniflux, or Fever API accounts
 
 ## Reading List (Story Queue)
 The plugin includes a temporary reading list that lets you queue stories for later reading or batch saving:
