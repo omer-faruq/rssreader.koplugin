@@ -152,7 +152,7 @@ function ExternalAPI.saveSanitized(url, title, target_directory, on_complete)
             
             title_for_filename = title_for_filename:gsub("^%s+", ""):gsub("%s+$", "")
             
-            local safe_title = title_for_filename:gsub("[^%w%s%-_]", "_"):gsub("%s+", "_")
+            local safe_title = utils.sanitizeFilenameComponent(title_for_filename)
             local title_filename = safe_title .. ".html"
             
             if page_title then

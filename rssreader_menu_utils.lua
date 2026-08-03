@@ -689,16 +689,50 @@ function utils.normalizeStoryLink(story)
     end
 end
 
+-- Replaces only characters that are actually illegal in Windows/Linux
+-- filenames (plus control characters), leaving non-ASCII letters (Cyrillic,
+-- Turkish, etc.) intact so archived filenames stay legible.
+function utils.sanitizeFilenameComponent(str)
+    if type(str) ~= "string" or str == "" then
+        return ""
+    end
+    str = str:gsub('[%c<>:"/\\|?*]', "_")
+    str = str:gsub("%s+", "_")
+    str = str:gsub("_+", "_")
+    str = str:gsub("^[_%.]+", ""):gsub("[_%.]+$", "")
+    return str
+end
+
+-- Truncates to at most max_bytes bytes without splitting a multi-byte UTF-8
+-- character in half; plain string.sub cuts on byte offsets and can leave a
+-- dangling lead/continuation byte that some filesystems reject.
+function utils.truncateUtf8Bytes(str, max_bytes)
+    if type(str) ~= "string" or #str <= max_bytes then
+        return str
+    end
+    local parts = {}
+    local len = 0
+    for uchar in str:gmatch(util.UTF8_CHAR_PATTERN) do
+        local clen = #uchar
+        if len + clen > max_bytes then
+            break
+        end
+        parts[#parts + 1] = uchar
+        len = len + clen
+    end
+    return table.concat(parts)
+end
+
 function utils.safeFilenameFromStory(story)
     if not story then
         return string.format("story_%d.html", os.time())
     end
     local title = story.story_title or story.title or story.permalink or "story"
-    title = title:gsub("[^%w%._-]", "_")
+    title = utils.sanitizeFilenameComponent(title)
     if title == "" then
         title = "story"
     end
-    return string.format("%s_%d.html", title:sub(1, 64), os.time())
+    return string.format("%s_%d.html", utils.truncateUtf8Bytes(title, 64), os.time())
 end
 
 function utils.resolveStoryDocumentTitle(story)
@@ -1221,7 +1255,7 @@ function utils.downloadStoryToCache(story, builder, on_complete)
         
         page_title = page_title:gsub("^%s+", ""):gsub("%s+$", "")
         
-        local safe_title = page_title:gsub("[^%w%s%-_]", "_"):gsub("%s+", "_")
+        local safe_title = utils.sanitizeFilenameComponent(page_title)
         local title_filename = safe_title .. ".html"
         local target_path = cache_dir .. "/" .. title_filename
 
@@ -1296,7 +1330,7 @@ function utils.buildUniqueTargetPath(directory, filename)
 end
 
 function utils.buildUniqueTargetPathWithExtension(directory, base_name, extension)
-    local sanitized_base = base_name:gsub("[^%w%._-]", "_")
+    local sanitized_base = utils.sanitizeFilenameComponent(base_name)
     local candidate = string.format("%s/%s.%s", directory, sanitized_base, extension)
     local counter = 1
     while util.pathExists(candidate) do
@@ -1395,7 +1429,7 @@ function utils.saveSanitizedLink(link, builder, on_complete)
             
             title_for_filename = title_for_filename:gsub("^%s+", ""):gsub("%s+$", "")
             
-            local safe_title = title_for_filename:gsub("[^%w%s%-_]", "_"):gsub("%s+", "_")
+            local safe_title = utils.sanitizeFilenameComponent(title_for_filename)
             local title_filename = safe_title .. ".html"
             
             if page_title then

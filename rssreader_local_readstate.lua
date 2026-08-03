@@ -19,6 +19,26 @@ local function toString(value)
     return tostring(value)
 end
 
+-- Truncates to at most max_bytes bytes without splitting a multi-byte UTF-8
+-- character in half; plain string.sub cuts on byte offsets and can leave a
+-- dangling lead/continuation byte that some filesystems reject.
+local function truncateUtf8Bytes(str, max_bytes)
+    if type(str) ~= "string" or #str <= max_bytes then
+        return str
+    end
+    local parts = {}
+    local len = 0
+    for uchar in str:gmatch(util.UTF8_CHAR_PATTERN) do
+        local clen = #uchar
+        if len + clen > max_bytes then
+            break
+        end
+        parts[#parts + 1] = uchar
+        len = len + clen
+    end
+    return table.concat(parts)
+end
+
 local function buildFilename(feed_identifier)
     local base_dir = ensureBaseDir()
     local identifier = feed_identifier
@@ -38,7 +58,7 @@ local function buildFilename(feed_identifier)
     if sanitized == "" then
         sanitized = "local_feed"
     else
-        sanitized = sanitized:sub(1, 80)
+        sanitized = truncateUtf8Bytes(sanitized, 80)
     end
     return string.format("%s/%s_%s.json", base_dir, sanitized, digest)
 end
