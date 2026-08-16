@@ -14,6 +14,7 @@ local lfs = require("libs/libkoreader-lfs")
 local DataStorage = require("datastorage")
 
 local Screen = Device.screen
+local Input = Device.input
 
 local Accounts = require("rssreader_accounts")
 local MenuBuilder = require("rssreader_menu")
@@ -596,6 +597,58 @@ local function removeWidgetFromGroup(group, widget)
     end
 end
 
+-- The Back button lives in the menu's page_info group, which Menu never puts in
+-- its FocusManager layout. Append it as a last row so key-navigated devices can
+-- reach it, and reinstall it after every updateItems (which rebuilds the layout).
+local function appendBackButtonToLayout(menu_instance)
+    local button = menu_instance._rss_back_button
+    if not button or not menu_instance.layout then
+        return
+    end
+    local last_row = menu_instance.layout[#menu_instance.layout]
+    if last_row and last_row[1] == button then
+        return
+    end
+    table.insert(menu_instance.layout, { button })
+end
+
+local function hookBackButtonIntoLayout(menu_instance)
+    if not Device:hasDPad() or menu_instance._rss_layout_hooked then
+        return
+    end
+    menu_instance._rss_layout_hooked = true
+    local base_update_items = menu_instance.updateItems
+    menu_instance.updateItems = function(this, ...)
+        local ret = base_update_items(this, ...)
+        appendBackButtonToLayout(this)
+        return ret
+    end
+    appendBackButtonToLayout(menu_instance)
+end
+
+-- Menu binds the hardware Back key to Close, which tears down the whole
+-- navigation stack instead of stepping up one level. Reroute it to whatever the
+-- on-screen Back button currently does.
+function RSSReader:bindBackKey(menu_instance)
+    if not Device:hasKeys() or menu_instance._rss_back_key_bound or not menu_instance.key_events then
+        return
+    end
+    menu_instance.key_events.Close = nil
+    menu_instance.key_events.RssBack = Device:hasFewKeys()
+        and { { "Left" } }
+        or { { Input.group.Back } }
+    menu_instance.onRssBack = function(this)
+        local button = this._rss_back_button
+        if button and button.callback then
+            button.callback()
+        else
+            self:goBackFromMenu(this)
+        end
+        return true
+    end
+    menu_instance._rss_back_key_bound = true
+end
+
 function RSSReader:updateBackButton(menu_instance)
     if not menu_instance or not menu_instance.page_info then
         return
@@ -627,6 +680,8 @@ function RSSReader:updateBackButton(menu_instance)
             menu_instance._rss_back_inserted = true
             menu_instance.page_info:resetLayout()
         end
+        self:bindBackKey(menu_instance)
+        hookBackButtonIntoLayout(menu_instance)
         return
     end
 
@@ -659,6 +714,8 @@ function RSSReader:updateBackButton(menu_instance)
         menu_instance._rss_back_inserted = true
     end
     menu_instance.page_info:resetLayout()
+    self:bindBackKey(menu_instance)
+    hookBackButtonIntoLayout(menu_instance)
 end
 
 function RSSReader:goBackFromMenu(menu_instance)

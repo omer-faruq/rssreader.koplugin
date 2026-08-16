@@ -134,6 +134,16 @@ Configure what happens when you tap a story in the feed list:
   - **Add to list** – Adds the story to the reading list
 - The setting applies to all account types (local, NewsBlur, CommaFeed, FreshRSS) and the reading list
 
+## Devices Without a Touchscreen
+
+On devices with physical keys only (Kindle 3/4, key-based Kobo/PocketBook models), the plugin is driven entirely with the hardware buttons:
+
+- **Up / Down** – Move the selection through the list; the selection wraps around onto the **Back** button below the last item
+- **Press** (5-way center) – Open the selected entry, or activate the focused **Back** button
+- **Long-press equivalent** (context menu of the selected entry) – `ScreenKB` + `Press` on Kindle 4, `Shift` + `Press` on keyboard devices, or the `Right` key on few-key devices
+- **Page turn buttons** – Previous / next page in lists, scroll up / down in the story preview
+- **Back** – Go up one level (feed → category → account list); on the top level it closes RSS Reader. It also closes the story preview
+
 ## Image Download Settings
 The `features` block in `rssreader_configuration.lua` controls how the plugin fetches and displays article images. Three switches let you balance visual richness with bandwidth and storage:
 

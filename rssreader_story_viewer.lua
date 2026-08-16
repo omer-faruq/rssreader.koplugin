@@ -13,7 +13,7 @@ local FrameContainer = require("ui/widget/container/framecontainer")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local ButtonTable = require("ui/widget/buttontable")
-local WidgetContainer = require("ui/widget/container/widgetcontainer")
+local InputContainer = require("ui/widget/container/inputcontainer")
 local logger = require("logger")
 local util = require("util")
 local lfs = require("libs/libkoreader-lfs")
@@ -24,6 +24,7 @@ local NetworkMgr = require("ui/network/manager")
 local Pool = require("rssreader_pool")
 
 local Screen = Device.screen
+local Input = Device.input
 
 local StoryViewer = {}
 StoryViewer.__index = StoryViewer
@@ -656,15 +657,23 @@ function StoryViewer:showStory(story, on_action, on_close, options)
     local height = screen_height - Size.padding.fullscreen * 2
     local title = base_title
 
-    local dialog = WidgetContainer:extend{}
+    -- InputContainer (not a plain WidgetContainer) so the dialog can register key
+    -- events: on devices without a touchscreen the Back key is the only way out.
+    local dialog = InputContainer:extend{}
     local viewer_dialog
+    local closed = false
 
     local function closeAll()
+        if closed then
+            return
+        end
+        closed = true
         if viewer_dialog then
             UIManager:close(viewer_dialog)
             viewer_dialog = nil
         end
         UIManager:setDirty(nil, "full")
+        pcall(os.remove, temp_file)
         if asset_cleanup then
             asset_cleanup()
         end
@@ -744,6 +753,14 @@ function StoryViewer:showStory(story, on_action, on_close, options)
         [1] = content_group,
     }
 
+    if Device:hasKeys() then
+        viewer_dialog.key_events.Close = { { Input.group.Back } }
+        viewer_dialog.onClose = function()
+            closeAll()
+            return true
+        end
+    end
+
     html_widget.dialog = viewer_dialog
 
     button_table.show_parent = viewer_dialog
@@ -751,12 +768,7 @@ function StoryViewer:showStory(story, on_action, on_close, options)
     UIManager:show(viewer_dialog)
     UIManager:setDirty(viewer_dialog, "full")
 
-    viewer_dialog.close_callback = function()
-        pcall(os.remove, temp_file)
-        if on_close then
-            on_close()
-        end
-    end
+    viewer_dialog.close_callback = closeAll
 end
 
 return StoryViewer
