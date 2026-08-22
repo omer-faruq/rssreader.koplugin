@@ -172,6 +172,31 @@ The `features` block in `rssreader_configuration.lua` controls how the plugin fe
 - **`download_images_when_sanitize_unsuccessful`** – Determines whether images should still be fetched when sanitizers fail and the original feed HTML is used instead. Turn it on if you want images even without sanitized content; leave it off to avoid extra downloads in fallback scenarios.
 - **`show_images_in_preview`** – Controls whether images appear in the story preview screen. Disable to prioritize text-only previews or reduce clutter; enable to keep the original illustrations visible while browsing stories.
 
+## EPUB Book Metadata
+When a story is saved as EPUB, the plugin fills in the metadata KOReader shows in
+**Book information** and in the file manager. Everything is derived from data
+already downloaded — the feed entry, the article HTML, and the images in the
+asset cache — so richer metadata never costs an extra request.
+
+- **Author(s)** – the entry's own byline (`author`/`creator`, which CommaFeed,
+  Fever, FreshRSS, Miniflux and NewsBlur all provide) on the first line, and the
+  feed title on the second. Entries that omit a byline fall back to the article
+  markup (`<meta name="author">`, `article:author`, `rel="author"`,
+  `itemprop="author"`); guesses that look like a date, a URL or a sentence are
+  discarded rather than shown.
+- **Description** – the entry's own summary, or, when the feed provides none, a
+  ~320-character excerpt built from the article's opening paragraphs with
+  headings and figure captions removed.
+- **Cover** – the thumbnail the feed nominates (`media:thumbnail`,
+  `media:content`, an image enclosure, `itunes:image`, JSON-Feed `image`) when it
+  is among the article's images. Otherwise the first cached image whose real
+  pixel size looks like an illustration rather than an icon or a banner strip,
+  measured by reading PNG/GIF/JPEG headers off disk. Requires image downloads to
+  be enabled.
+- **Chapters** – the article's `<h1>`–`<h6>` get anchors and the EPUB carries a
+  nested table of contents. Heading levels are normalized, so an article built
+  out of `<h2>`/`<h3>` still starts at TOC depth 1.
+
 ## Content Sanitizers
 Sanitizers fetch and normalize full-page article HTML before it is shown in KOReader. When you open a story the plugin iterates over the active sanitizers in the order configured under `sanitizers` in `rssreader_configuration.lua`. Each sanitizer tries to produce cleaned HTML; if it fails (for example, by returning empty content or hitting an error) the plugin automatically falls back to the next sanitizer in the list, and eventually to the original feed content if none succeed.
 

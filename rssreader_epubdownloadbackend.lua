@@ -1,5 +1,6 @@
 local CacheSQLite = require("cachesqlite")
 local DataStorage = require("datastorage")
+local EpubMetadata = require("rssreader_epub_metadata")
 local Version = require("version")
 local ffiutil = require("ffi/util")
 local http = require("socket.http")
@@ -390,7 +391,28 @@ local ext_to_mimetype = {
 -- to an absolute local file path. When a match is found, the image bytes are
 -- read from disk instead of being re-downloaded via HTTP. This lets callers
 -- that already have the images cached locally avoid the double download.
-function EpubDownloadBackend:createEpub(epub_path, html, url, include_images, message, filter_enable, filter_element, author, local_assets)
+--- Collect the byline, summary and thumbnail a feed entry already carries,
+-- in the shape createEpub's `story_meta` argument expects. Exposed here so
+-- callers do not need to reach for the metadata module themselves.
+function EpubDownloadBackend:storyMetadata(story)
+    return EpubMetadata.fromStory(story)
+end
+
+--- Build an EPUB out of an already downloaded article.
+-- @string epub_path target file
+-- @string html article markup
+-- @string url original article URL, used to resolve relative links
+-- @bool include_images whether images should be packed in
+-- @string message progress message prefix
+-- @bool filter_enable restrict the markup to filter_element
+-- @string filter_element element to keep when filtering
+-- @string author feed title, written as the second author line
+-- @tparam table local_assets map of original src -> local file path
+-- @tparam[opt] table story_meta extra metadata from the feed entry:
+--   `author` (the entry's own byline), `summary` (its description) and
+--   `cover_url` (the thumbnail the feed nominates). All optional, and all
+--   already downloaded, so none of them costs an extra request.
+function EpubDownloadBackend:createEpub(epub_path, html, url, include_images, message, filter_enable, filter_element, author, local_assets, story_meta)
     logger.dbg("EpubDownloadBackend:createEpub(", epub_path, ")")
     if type(html) ~= "string" or html == "" then
         logger.warn("EpubDownloadBackend", "HTML content missing; aborting EPUB creation")
@@ -410,11 +432,24 @@ function EpubDownloadBackend:createEpub(epub_path, html, url, include_images, me
     end
     logger.dbg("page_htmltitle is ", page_htmltitle)
     
-    local page_author = author
-    if not page_author or page_author == "" then
-        page_author = nil
+    story_meta = story_meta or {}
+
+    -- The feed title, kept as the source line under the byline below.
+    local page_feed = author
+    if not page_feed or page_feed == "" then
+        page_feed = nil
     end
-    logger.dbg("page_author is ", page_author)
+    -- The entry's own byline. Most backends expose one; only when they do not
+    -- do we look at the markup, and even then we never fetch the page again.
+    local page_author = EpubMetadata.normalizeAuthor(story_meta.author)
+        or EpubMetadata.extractAuthorFromHtml(html)
+    logger.dbg("page_author is ", page_author, "page_feed is ", page_feed)
+
+    -- Feeds usually carry a summary; fall back to the article's own opening
+    -- paragraphs so the book description is not left empty.
+    local page_description = EpubMetadata.buildExcerpt(story_meta.summary)
+        or EpubMetadata.buildExcerpt(html)
+    logger.dbg("page_description is ", page_description)
 
     -- Rejigger HTML into XHTML to avoid unclosed elements. See <https://github.com/koreader/crengine/pull/370#issuecomment-910156921>.
     local cre = require("libs/libkoreader-cre")
@@ -437,7 +472,6 @@ function EpubDownloadBackend:createEpub(epub_path, html, url, include_images, me
     local images = {}
     local seen_images = {}
     local imagenum = 1
-    local cover_imgid = nil -- best candidate for cover among our images
     local processImg = function(img_tag)
         local src = img_tag:match([[src="([^"]*)"]])
         if src == nil or src == "" then
@@ -503,11 +537,6 @@ function EpubDownloadBackend:createEpub(epub_path, html, url, include_images, me
             }
             table.insert(images, cur_image)
             seen_images[src] = cur_image
-            -- Use first image of reasonable size (not an icon) and portrait-like as cover-image
-            if not cover_imgid and width and width > 50 and height and height > 50 and height > width then
-                logger.dbg("Found a suitable cover image")
-                cover_imgid = imgid
-            end
             imagenum = imagenum + 1
         end
         -- crengine will NOT use width and height attributes, but it will use
@@ -538,6 +567,17 @@ function EpubDownloadBackend:createEpub(epub_path, html, url, include_images, me
         -- So the user will see the image legends and know a bit about
         -- the images he chose to not get.
     end
+
+    -- Cover: the image the feed nominates, else the first one already cached
+    -- on disk that measures like an illustration. Both read what we already
+    -- have, so no image is fetched here just to be sized up.
+    local cover_imgid = include_images
+        and EpubMetadata.pickCoverImgid(images, story_meta.cover_url) or nil
+
+    -- Turn the article's own heading levels into chapters (anchors + navMap).
+    local toc_entries
+    html, toc_entries = EpubMetadata.extractHeadings(html)
+    local toc_depth = EpubMetadata.normalizeLevels(toc_entries)
 
     UI:info(T(_("%1\n\nBuilding EPUB…"), message))
     -- Open the zip file (with .tmp for now, as crengine may still
@@ -593,14 +633,22 @@ function EpubDownloadBackend:createEpub(epub_path, html, url, include_images, me
     end
     logger.dbg("meta_cover:", meta_cover)
     
+    -- crengine joins several dc:creator entries with newlines and KOReader's
+    -- book information renders them one per line, so the byline and the feed
+    -- it came from can both be shown. KOReader never reads dc:publisher, so
+    -- the feed name would be invisible there.
     local author_meta = ""
-    if page_author then
-        local util = require("util")
-        local escaped_author = util.htmlEscape(page_author)
-        author_meta = string.format([[
-    <dc:creator>%s</dc:creator>]], escaped_author)
+    for _, name in ipairs({ page_author, page_feed }) do
+        if name then
+            author_meta = author_meta .. string.format("\n    <dc:creator>%s</dc:creator>",
+                EpubMetadata.xmlEsc(name))
+        end
     end
-    
+    if page_description then
+        author_meta = author_meta .. string.format("\n    <dc:description>%s</dc:description>",
+            EpubMetadata.xmlEsc(page_description))
+    end
+
     table.insert(content_opf_parts, string.format([[
 <?xml version='1.0' encoding='utf-8'?>
 <package xmlns="http://www.idpf.org/2007/opf"
@@ -646,18 +694,17 @@ function EpubDownloadBackend:createEpub(epub_path, html, url, include_images, me
     -- ----------------------------------------------------------------
     -- OEBPS/toc.ncx : table of content
     local toc_ncx_parts = {}
-    local depth = 0
-    local cur_level = 0
-    local np_end = [[</navPoint>]]
-    local num = 1
-    -- Add our own first section for first page, with page name as title
-    table.insert(toc_ncx_parts, string.format([[<navPoint id="navpoint-%s" playOrder="%s"><navLabel><text>%s</text></navLabel><content src="content.html"/>]], num, num, page_htmltitle))
-    table.insert(toc_ncx_parts, np_end)
-    --- @todo Not essential for most articles, but longer articles might benefit
-    -- from parsing <h*> tags and constructing a proper TOC
-    while cur_level > 0 do
-        table.insert(toc_ncx_parts, np_end)
-        cur_level = cur_level - 1
+    local depth
+    if #toc_entries > 0 then
+        -- The article's own <h1>-<h6> levels, nested and anchored.
+        table.insert(toc_ncx_parts, EpubMetadata.buildNavMap(toc_entries, "content.html"))
+        depth = toc_depth
+    else
+        -- No headings: keep the single whole-article entry.
+        table.insert(toc_ncx_parts, string.format(
+            [[<navPoint id="navpoint-1" playOrder="1"><navLabel><text>%s</text></navLabel><content src="content.html"/></navPoint>]],
+            page_htmltitle))
+        depth = 1
     end
     -- Prepend NCX head
     table.insert(toc_ncx_parts, 1, string.format([[

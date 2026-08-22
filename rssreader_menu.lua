@@ -455,7 +455,7 @@ function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
                 local feed_title = target_story.feed_title or target_story.feedTitle
                 local local_assets = metadata.local_assets
                 local ok, result_or_err = pcall(function()
-                    return utils.EpubDownloadBackend:createEpub(epub_path, html_for_epub, story_url, include_images, nil, nil, nil, feed_title, local_assets)
+                    return utils.EpubDownloadBackend:createEpub(epub_path, html_for_epub, story_url, include_images, nil, nil, nil, feed_title, local_assets, utils.EpubDownloadBackend:storyMetadata(target_story))
                 end)
                 local success = ok and result_or_err ~= false
                 if success then
@@ -2806,7 +2806,7 @@ function MenuBuilder:poolSaveSingleStory(story, pool_index)
             local feed_title = story.feed_title or story.feedTitle
             local local_assets = metadata.local_assets
             local ok, result_or_err = pcall(function()
-                return utils.EpubDownloadBackend:createEpub(epub_path, html_for_epub, story_url, include_images, nil, nil, nil, feed_title, local_assets)
+                return utils.EpubDownloadBackend:createEpub(epub_path, html_for_epub, story_url, include_images, nil, nil, nil, feed_title, local_assets, utils.EpubDownloadBackend:storyMetadata(story))
             end)
             local success = ok and result_or_err ~= false
             if success then
@@ -3006,7 +3006,7 @@ function MenuBuilder:poolSaveAll()
                 local feed_title = story.feed_title or story.feedTitle
                 local local_assets = metadata.local_assets
                 local ok, result_or_err = pcall(function()
-                    return utils.EpubDownloadBackend:createEpub(epub_path, html_for_epub, story_url, include_images, nil, nil, nil, feed_title, local_assets)
+                    return utils.EpubDownloadBackend:createEpub(epub_path, html_for_epub, story_url, include_images, nil, nil, nil, feed_title, local_assets, utils.EpubDownloadBackend:storyMetadata(story))
                 end)
                 saved = ok and result_or_err ~= false
                 if not saved then
