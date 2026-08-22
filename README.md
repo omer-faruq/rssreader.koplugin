@@ -134,6 +134,26 @@ Configure what happens when you tap a story in the feed list:
   - **Add to list** – Adds the story to the reading list
 - The setting applies to all account types (local, NewsBlur, CommaFeed, FreshRSS) and the reading list
 
+## Returning to RSS from an Opened Article
+
+When you open a story, it is downloaded to the RSS Reader cache and handed to KOReader, which opens it as a normal document. From there the RSS menus are gone, so the plugin adds several ways back to the feed list you came from. All of them are optional and configured under **RSS Reader** → **Settings** → **Return to RSS from an article**:
+
+- **Show floating button** – A small `RSS` button drawn in a corner of every page. On by default on touchscreens, off by default on key-only devices (where there is nothing to tap)
+- **Corner tap returns to the list** – Makes that corner tappable. Works with the button hidden too, if you prefer no permanent overlay on an e-ink screen
+- **Corner** – Which corner the button and its tap area live in: bottom right (default), bottom left, top right, top left. Bottom right is the default because it is the least contested spot: the top strip doubles as KOReader's menu tap zone, the top right corner is where the bookmark dogear is drawn and where the Gestures plugin puts *toggle bookmark*, while the bottom right corner ships with no action of its own. In a bottom corner the button sits just above the status bar rather than on top of it
+- **Ask at end of article** – Replaces KOReader's end-of-document dialog with one offering **Back to RSS list**, **Go to beginning** and **File browser**
+- **Back key returns to the list** – On devices with a Back key, pressing it in an article returns to the feed list instead of prompting to exit KOReader. It only steps in when there is nothing left to go back to inside the article itself, so following links and jumping around keeps working normally
+- **Enabled** – Master switch for all of the above
+
+Returning opens the feed list *on top of* the article, so closing the list drops you straight back into what you were reading, at the same position. Tapping another story opens it as usual.
+
+Two things this deliberately does not cover:
+
+- **Articles saved to your library** (the *Save* action, rather than opening from a list) are ordinary books; they get no RSS button
+- **Sanitized links** opened with the *Open Sanitized* link popup button are written to the same cache but are opened from inside some other book, so they get no RSS button either
+
+You can also reach RSS Reader from an open document through the top menu (**Search** tab → **RSS Reader**), or by assigning the **RSS Reader** action to a gesture, or — on key devices — to a hotkey via the Hotkeys plugin.
+
 ## Devices Without a Touchscreen
 
 On devices with physical keys only (Kindle 3/4, key-based Kobo/PocketBook models), the plugin is driven entirely with the hardware buttons:
@@ -143,6 +163,7 @@ On devices with physical keys only (Kindle 3/4, key-based Kobo/PocketBook models
 - **Long-press equivalent** (context menu of the selected entry) – `ScreenKB` + `Press` on Kindle 4, `Shift` + `Press` on keyboard devices, or the `Right` key on few-key devices
 - **Page turn buttons** – Previous / next page in lists, scroll up / down in the story preview
 - **Back** – Go up one level (feed → category → account list); on the top level it closes RSS Reader. It also closes the story preview
+- **Back inside an opened article** – Returns to the feed list you came from instead of prompting to exit KOReader (see [Returning to RSS from an Opened Article](#returning-to-rss-from-an-opened-article)). On Kindle 4 you can additionally bind the **RSS Reader** action to a `ScreenKB` + key combination with the Hotkeys plugin
 
 ## Image Download Settings
 The `features` block in `rssreader_configuration.lua` controls how the plugin fetches and displays article images. Three switches let you balance visual richness with bandwidth and storage:

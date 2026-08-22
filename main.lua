@@ -11,6 +11,7 @@ local _ = require("gettext")
 local json = require("common/json")
 local util = require("util")
 local lfs = require("libs/libkoreader-lfs")
+local logger = require("logger")
 local DataStorage = require("datastorage")
 
 local Screen = Device.screen
@@ -19,6 +20,19 @@ local Input = Device.input
 local Accounts = require("rssreader_accounts")
 local MenuBuilder = require("rssreader_menu")
 local backends = require("rssreader_menu_backends")
+
+-- Optional: adds the ways back to the feed list from an article opened as a
+-- document. Loaded defensively so a problem in there can never keep the plugin
+-- itself from starting.
+local ReaderReturn
+do
+    local ok, module_or_err = pcall(require, "rssreader_reader_return")
+    if ok then
+        ReaderReturn = module_or_err
+    else
+        logger.warn("RSSReader: reader-return helpers unavailable:", module_or_err)
+    end
+end
 
 local FEED_STATE_MAX_AGE_SECONDS = 30 * 60
 
@@ -585,6 +599,31 @@ function RSSReader:onRSSReader()
     self:openAccountList()
 end
 
+-- Only ever fires on the ReaderUI-side instance of the plugin; ReaderReturn
+-- decides for itself whether this particular document came from a feed list.
+function RSSReader:onReaderReady()
+    if not ReaderReturn then
+        return
+    end
+    local ok, err = pcall(ReaderReturn.setup, self)
+    if not ok then
+        logger.warn("RSSReader: reader-return setup failed:", err)
+    end
+end
+
+-- The floating button lays itself out against the current screen size on every
+-- paint, its tap zone does not: realign them after a rotation. Deliberately
+-- returns nothing, so the event keeps propagating to ReaderUI, whose own
+-- handler rescales the touch zones first -- hence the nextTick.
+function RSSReader:onScreenResize()
+    if not ReaderReturn or not self._rss_return_active then
+        return
+    end
+    UIManager:nextTick(function()
+        pcall(ReaderReturn.refreshTouchZone, self)
+    end)
+end
+
 local function removeWidgetFromGroup(group, widget)
     if not group or not widget then
         return
@@ -826,9 +865,14 @@ function RSSReader:openAccountList(opts)
     end
 
     if not opts.skip_restore then
-        -- Try to restore previous state first
+        -- Try to restore previous state first.
+        -- force_restore ignores the freshness window: it is used when coming
+        -- back from an article that was opened *from* this list, where reading
+        -- for more than FEED_STATE_MAX_AGE_SECONDS is entirely normal and
+        -- dropping the user at the account list would be the wrong answer.
         local saved_state = self:loadNavigationState()
-        if saved_state and self:isFeedStateRecent(saved_state) and self:restoreNavigationState(saved_state) then
+        if saved_state and (opts.force_restore or self:isFeedStateRecent(saved_state))
+                and self:restoreNavigationState(saved_state) then
             return
         end
     end

@@ -270,7 +270,7 @@ function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
                     UIManager:show(InfoMessage:new{ text = string.format(_("Opening: %s"), link) })
                 end
             end
-        end)
+        end, { rss_return = true })
         return
     end
 
@@ -1835,6 +1835,18 @@ function MenuBuilder:showSettingsPopup()
                 end,
             }},
             {{
+                text = _("Return to RSS from an article"),
+                background = Blitbuffer.COLOR_WHITE,
+                align = "left",
+                enabled = utils.ReaderReturn ~= nil,
+                callback = function()
+                    UIManager:close(dialog)
+                    if utils.ReaderReturn then
+                        pcall(utils.ReaderReturn.showSettings)
+                    end
+                end,
+            }},
+            {{
                 text = show_newsblur_all and "✓ " .. _("Show NewsBlur 'All Feeds'") or _("Show NewsBlur 'All Feeds'"),
                 background = Blitbuffer.COLOR_WHITE,
                 align = "left",
@@ -2491,7 +2503,7 @@ function MenuBuilder:handlePoolStoryAction(stories, index, action, payload)
                     UIManager:show(InfoMessage:new{ text = string.format(_("Opening: %s"), link) })
                 end
             end
-        end)
+        end, { rss_return = true })
         return
     end
 

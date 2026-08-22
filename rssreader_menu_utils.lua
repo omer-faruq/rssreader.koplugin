@@ -44,6 +44,19 @@ end
 
 utils.EpubDownloadBackend = loadEpubDownloadBackend()
 
+-- Optional; only used to flag "this document is a story opened from a feed
+-- list" so the reader can offer a way back. Never required for downloading.
+local function loadReaderReturn()
+    local ok, module_or_err = pcall(require, "rssreader_reader_return")
+    if ok then
+        return module_or_err
+    end
+    logger.info("RSSReader", "reader-return helpers unavailable", module_or_err)
+    return nil
+end
+
+utils.ReaderReturn = loadReaderReturn()
+
 local ENTITY_REPLACEMENTS = {
     ["&#8216;"] = "'",
     ["&#8217;"] = "'",
@@ -1217,7 +1230,10 @@ function utils.fetchStoryContent(story, builder, on_complete, options)
     end)
 end
 
-function utils.downloadStoryToCache(story, builder, on_complete)
+-- opts.rss_return: this story is being opened from a feed list, so the reader
+-- may offer a way back to it. Left unset by the sanitized-link paths, which
+-- write to the same cache but are opened from inside some other book.
+function utils.downloadStoryToCache(story, builder, on_complete, opts)
     local cache_dir = utils.buildCacheDirectory()
     local filename = utils.safeFilenameFromStory(story)
     local base_name = filename:gsub("%.html$", "")
@@ -1271,6 +1287,9 @@ function utils.downloadStoryToCache(story, builder, on_complete)
             text = string.format(_("Opening from RSS Reader cache:\n%s"), target_path),
             timeout = 2,
         })
+        if opts and opts.rss_return and utils.ReaderReturn then
+            pcall(utils.ReaderReturn.markArticle, target_path)
+        end
         FileManager:openFile(target_path)
         if on_complete then
             on_complete(target_path)
