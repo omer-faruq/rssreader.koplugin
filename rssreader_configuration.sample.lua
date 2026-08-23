@@ -73,18 +73,34 @@ return {
             active = false, -- set to true to enable this account
         },
     },
-    sanitizers = { -- available types = fivefilters, diffbot, instaparser
-        {  
-            order = 1,  
-            type = "fivefilters",  
-            active = false,  
+    sanitizers = { -- available types = fivefilters, fivefilters_rapidapi, diffbot, instaparser
+        {
+            order = 1,
+            type = "fivefilters",
+            active = false,
             base_url = "https://rss.com",  -- your self host ftr instance
-        }, 
-        {  
-            order = 2,  
-            type = "fivefilters",  
-            active = true,  
-        }, 
+        },
+        {
+            order = 2,
+            type = "fivefilters_rapidapi",
+            active = false,
+            -- get your key here: https://rapidapi.com/fivefilters/api/full-text-rss
+            token = "your_rapidapi_key",
+            -- base_url is optional; defaults to https://full-text-rss.p.rapidapi.com
+            --
+            -- The free plan includes 250 requests per month and then keeps
+            -- serving, billing every further call, so the plugin counts them
+            -- and stops on its own. Raise this if you are on a paid plan, or
+            -- set 0 for no ceiling. Omitted means 250.
+            monthly_request_limit = 250,
+        },
+        {
+            -- The free public endpoint (ftr.fivefilters.net) was discontinued and
+            -- now answers 410, so this entry only works with a base_url above.
+            order = 3,
+            type = "fivefilters",
+            active = false,
+        },
         {
             order = 3,
             type = "diffbot",

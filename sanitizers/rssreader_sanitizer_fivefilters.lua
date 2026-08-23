@@ -1,5 +1,16 @@
 local util = require("util")
+local http = require("socket.http")
+local ltn12 = require("ltn12")
+local socketutil = require("socketutil")
+local logger = require("logger")
+
 local SanitizerBase = require("sanitizers/rssreader_sanitizer_base")
+
+-- Host of the FiveFilters API on RapidAPI. Only the makefulltextfeed.php
+-- route is reachable with GET there (extract.php is POST-only and returns
+-- JSON), which is convenient: makefulltextfeed.php answers with the same RSS
+-- the plain type already parses, so only the auth differs.
+local RAPIDAPI_HOST = "full-text-rss.p.rapidapi.com"
 
 local FiveFiltersSanitizer = {}
 
@@ -48,6 +59,79 @@ function FiveFiltersSanitizer.buildUrl(link, sanitizer)
         base_url,  
         encoded  
     )  
+end
+
+-- Same call as buildUrl, aimed at the RapidAPI proxy. base_url stays
+-- overridable so a RapidAPI-style deployment on another host can be used.
+function FiveFiltersSanitizer.buildRapidApiUrl(sanitizer, link)
+    if type(sanitizer) ~= "table" then
+        return nil
+    end
+
+    local token = sanitizer.token
+    if type(token) ~= "string" or token == "" then
+        return nil
+    end
+
+    local base_url = sanitizer.base_url
+    if type(base_url) ~= "string" or base_url == "" then
+        base_url = "https://" .. RAPIDAPI_HOST
+    end
+
+    return FiveFiltersSanitizer.buildUrl(link, { base_url = base_url })
+end
+
+-- RapidAPI authenticates with headers, which utils.fetchViaHttp cannot send,
+-- so this mirrors what the Diffbot and Instaparser sanitizers already do.
+function FiveFiltersSanitizer.fetchContent(sanitizer, url, on_complete)
+    local token = type(sanitizer) == "table" and sanitizer.token or nil
+    if type(token) ~= "string" or token == "" then
+        if on_complete then
+            on_complete(nil, "missing_token")
+        end
+        return
+    end
+
+    -- The proxy routes on the Host header, so it has to name the host we call.
+    local host = url:match("^https?://([^/]+)") or RAPIDAPI_HOST
+
+    local sink = {}
+    -- Extraction runs server-side; measured calls land well under a second,
+    -- so the same budget as the other sanitizers is plenty.
+    socketutil:set_timeout(8, 20)
+    local ok, status_code, _, status_text = http.request{
+        url = url,
+        method = "GET",
+        sink = ltn12.sink.table(sink),
+        headers = {
+            ["Accept-Encoding"] = "identity",
+            ["User-Agent"] = "KOReader RSSReader",
+            ["x-rapidapi-host"] = host,
+            ["x-rapidapi-key"] = token,
+        },
+    }
+    socketutil:reset_timeout()
+
+    if not ok or tostring(status_code):sub(1, 1) ~= "2" then
+        -- 401/403 means a bad or missing key, 429 an exhausted quota.
+        logger.info("RSSReader", "FiveFilters RapidAPI request failed", status_text or status_code)
+        if on_complete then
+            on_complete(nil, status_text or status_code or "rapidapi_request_failed")
+        end
+        return
+    end
+
+    local payload = table.concat(sink)
+    if not payload or payload == "" then
+        if on_complete then
+            on_complete(nil, "empty_content")
+        end
+        return
+    end
+
+    if on_complete then
+        on_complete(payload)
+    end
 end
 
 function FiveFiltersSanitizer.detectBlocked(content)

@@ -18,11 +18,17 @@ local HtmlResources = require("rssreader_html_resources")
 local FiveFiltersSanitizer = require("sanitizers/rssreader_sanitizer_fivefilters")
 local DiffbotSanitizer = require("sanitizers/rssreader_sanitizer_diffbot")
 local InstaparserSanitizer = require("sanitizers/rssreader_sanitizer_instaparser")
+local SanitizerQuota = require("sanitizers/rssreader_sanitizer_quota")
 local Trapper = require("ui/trapper")
 local sha2 = require("ffi/sha2")
 local T = require("ffi/util").template
 
 local utils = {}
+
+-- Requests included in the free RapidAPI plan for FiveFilters. Anything past
+-- it is billed per call, so this is the ceiling used when a sanitizer entry
+-- does not set monthly_request_limit itself. Set that field to 0 to lift it.
+utils.DEFAULT_RAPIDAPI_MONTHLY_LIMIT = 250
 
 local function loadEpubDownloadBackend()
     local candidates = {
@@ -601,6 +607,15 @@ function utils.shouldDownloadImages(builder, sanitized_successful)
     return flag == true
 end
 
+-- Shown in the "Trying sanitizer (…)" progress line; the raw config type is
+-- used for anything not listed here.
+local SANITIZER_LABELS = {
+    fivefilters = "FiveFilters",
+    fivefilters_rapidapi = "FiveFilters (RapidAPI)",
+    diffbot = "Diffbot",
+    instaparser = "Instaparser",
+}
+
 function utils.collectActiveSanitizers(builder)
     if not builder or not builder.accounts or not builder.accounts.config then
         return nil
@@ -819,6 +834,36 @@ function utils.shouldUseFiveFilters(builder)
     return flag and true or false
 end
 
+-- The save/open shortcut used to fall back to a bare { type = "fivefilters" },
+-- which now only reaches the discontinued public endpoint. Prefer whatever the
+-- user actually configured, including an entry left inactive: the feature flag
+-- is an explicit opt-in of its own. Returns nil when nothing usable is set up,
+-- so the caller keeps the original feed content instead of a doomed request.
+function utils.defaultFiveFiltersSanitizer(builder)
+    local configured = builder and builder.accounts and builder.accounts.config
+        and builder.accounts.config.sanitizers
+    if type(configured) ~= "table" then
+        return nil
+    end
+
+    local self_hosted
+    for _, entry in ipairs(configured) do
+        if type(entry) == "table" and type(entry.type) == "string" then
+            local entry_type = entry.type:lower()
+            if entry_type == "fivefilters_rapidapi"
+                    and type(entry.token) == "string" and entry.token ~= "" then
+                return entry
+            end
+            if not self_hosted and entry_type == "fivefilters"
+                    and type(entry.base_url) == "string" and entry.base_url ~= "" then
+                self_hosted = entry
+            end
+        end
+    end
+
+    return self_hosted
+end
+
 function utils.fetchViaHttp(link, on_complete)
     local sink = {}
     -- Slightly tighter than socketutil.LARGE_* (10/30) so a single slow article
@@ -873,7 +918,10 @@ function utils.fetchStoryContent(story, builder, on_complete, options)
         UIManager:nextTick(function()
             local configured_sanitizers = utils.collectActiveSanitizers(builder)
             if (not configured_sanitizers or #configured_sanitizers == 0) and utils.shouldUseFiveFilters(builder) then
-                configured_sanitizers = { { type = "fivefilters" } }
+                local fallback_sanitizer = utils.defaultFiveFiltersSanitizer(builder)
+                if fallback_sanitizer then
+                    configured_sanitizers = { fallback_sanitizer }
+                end
             end
 
             -- Cancellation flag shared across all phases. It is flipped
@@ -1117,44 +1165,78 @@ function utils.fetchStoryContent(story, builder, on_complete, options)
                     end
 
                     local sanitizer_type = sanitizer.type and sanitizer.type:lower() or ""
-                    local sanitizer_label = sanitizer_type
+                    local sanitizer_label = SANITIZER_LABELS[sanitizer_type] or sanitizer_type
                     if sanitizer_label == "" then sanitizer_label = "?" end
                     showProgress(T(_("Trying sanitizer (%1)…"), sanitizer_label))
 
+                    -- Both FiveFilters flavours hit makefulltextfeed.php and get
+                    -- the same RSS back; only the transport differs, so the two
+                    -- branches below share this.
+                    local function consumeFiveFiltersFeed(content)
+                        if cancelled then
+                            safeComplete(nil, "cancelled")
+                            return
+                        end
+                        if not content then
+                            processSanitizer(index + 1)
+                            return
+                        end
+
+                        if not FiveFiltersSanitizer.hasLikelyXmlStructure(content) then
+                            processSanitizer(index + 1)
+                            return
+                        end
+
+                        if FiveFiltersSanitizer.detectBlocked(content) then
+                            processSanitizer(index + 1)
+                            return
+                        end
+
+                        local fivefilters_html = FiveFiltersSanitizer.rewriteHtml(FiveFiltersSanitizer.extractHtml(content))
+                        if not fivefilters_html or not FiveFiltersSanitizer.contentIsMeaningful(fivefilters_html) then
+                            processSanitizer(index + 1)
+                            return
+                        end
+
+                        finalizeContent(fivefilters_html, true)
+                    end
+
                     if sanitizer_type == "fivefilters" then
-                        local fivefilters_url = FiveFiltersSanitizer.buildUrl(link)
+                        local fivefilters_url = FiveFiltersSanitizer.buildUrl(link, sanitizer)
                         if not fivefilters_url then
                             processSanitizer(index + 1)
                             return
                         end
 
                         utils.fetchViaHttp(fivefilters_url, function(content, err)
-                            if cancelled then
-                                safeComplete(nil, "cancelled")
-                                return
-                            end
-                            if not content then
-                                processSanitizer(index + 1)
-                                return
-                            end
+                            consumeFiveFiltersFeed(content)
+                        end)
+                    elseif sanitizer_type == "fivefilters_rapidapi" then
+                        local rapidapi_url = FiveFiltersSanitizer.buildRapidApiUrl(sanitizer, link)
+                        if not rapidapi_url then
+                            logger.info("RSSReader", "FiveFilters RapidAPI sanitizer misconfigured; skipping")
+                            processSanitizer(index + 1)
+                            return
+                        end
 
-                            if not FiveFiltersSanitizer.hasLikelyXmlStructure(content) then
-                                processSanitizer(index + 1)
-                                return
+                        -- RapidAPI keeps serving (and billing) past the free
+                        -- quota, so stop here rather than at their end.
+                        local monthly_limit = tonumber(sanitizer.monthly_request_limit)
+                            or utils.DEFAULT_RAPIDAPI_MONTHLY_LIMIT
+                        if not SanitizerQuota.consume("fivefilters_rapidapi", monthly_limit) then
+                            logger.info("RSSReader", "FiveFilters RapidAPI monthly limit reached; skipping")
+                            if not silent and SanitizerQuota.shouldWarn("fivefilters_rapidapi") then
+                                UIManager:show(InfoMessage:new{
+                                    text = T(_("FiveFilters (RapidAPI): the %1 requests for this month are used up. Falling back to the other sanitizers until next month."),
+                                        monthly_limit),
+                                })
                             end
+                            processSanitizer(index + 1)
+                            return
+                        end
 
-                            if FiveFiltersSanitizer.detectBlocked(content) then
-                                processSanitizer(index + 1)
-                                return
-                            end
-
-                            local fivefilters_html = FiveFiltersSanitizer.rewriteHtml(FiveFiltersSanitizer.extractHtml(content))
-                            if not fivefilters_html or not FiveFiltersSanitizer.contentIsMeaningful(fivefilters_html) then
-                                processSanitizer(index + 1)
-                                return
-                            end
-
-                            finalizeContent(fivefilters_html, true)
+                        FiveFiltersSanitizer.fetchContent(sanitizer, rapidapi_url, function(content, err)
+                            consumeFiveFiltersFeed(content)
                         end)
                     elseif sanitizer_type == "diffbot" then
                         local diffbot_url = DiffbotSanitizer.buildUrl(sanitizer, link)

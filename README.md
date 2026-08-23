@@ -202,9 +202,12 @@ Sanitizers fetch and normalize full-page article HTML before it is shown in KORe
 
 - **Instaparser** – Uses the Instaparser Article API to extract clean article content. Requires an API token from [instaparser.com](https://instaparser.com/). The free tier provides **1,000 requests per month**. Set the token in the sanitizer configuration entry.
 - **Diffbot** – Uses the Diffbot Analyze API to extract article bodies. Diffbot requires a token tied to a work e-mail domain and the free tier currently grants **10,000 credits per month**. Set the token in the sanitizer configuration entry.
-- **FiveFilters** – Calls the FiveFilters Full-Text RSS endpoint. No account or token is required; you simply enable the sanitizer in the configuration.
+- **FiveFilters** – Calls a Full-Text RSS `makefulltextfeed.php` endpoint. The free public service at `ftr.fivefilters.net` has been **discontinued** (it answers `410 Gone` with an empty feed), so this type is only useful with `base_url` pointing at your own Full-Text RSS instance. It sends no credentials.
+- **FiveFilters (RapidAPI)** – `type = "fivefilters_rapidapi"`. Same endpoint and same output, reached through the [FiveFilters API on RapidAPI](https://rapidapi.com/fivefilters/api/full-text-rss), which authenticates with a key sent as request headers. Put the key in `token`; `base_url` is optional and defaults to `https://full-text-rss.p.rapidapi.com`. The free plan costs nothing to subscribe to but includes only **250 requests per month**, and it is a *soft* limit: further calls are not blocked, they are billed (currently $0.05 each) up to a hard ceiling of 2,000 calls. The plugin therefore counts requests itself and stops when `monthly_request_limit` (default **250**) is reached, falling back to the next sanitizer until the month rolls over. Set it to `0` to lift the ceiling, or raise it on a paid plan. The count lives in `data/rssreader_sanitizer_quota.json` and resets on its own each month.
 
 Mix and match the sanitizers to suit your feeds. Keep the most reliable option first so it is attempted before the fallbacks.
+
+Note that Diffbot, Instaparser and the RapidAPI variant all send the URL of every article you open to a third-party service, and their keys are stored in plain text in `rssreader_configuration.lua`.
 
 ### Mark All as Read
 - **Long-press any feed title** to open the contextual menu.

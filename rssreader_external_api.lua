@@ -17,10 +17,14 @@ local function loadRSSReaderConfig()
     end
     return {
         accounts = {},
+        -- All inactive: every sanitizer needs a key or a self-hosted base_url
+        -- now that the free FiveFilters endpoint is gone, so without a config
+        -- file there is nothing to call and stories keep their feed content.
         sanitizers = {
-            { type = "fivefilters", active = true, order = 1 },
-            { type = "diffbot", active = false, order = 2 },
-            { type = "instaparser", active = false, order = 3 },
+            { type = "fivefilters", active = false, order = 1 },
+            { type = "fivefilters_rapidapi", active = false, order = 2 },
+            { type = "diffbot", active = false, order = 3 },
+            { type = "instaparser", active = false, order = 4 },
         },
         features = {}
     }

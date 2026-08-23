@@ -420,6 +420,12 @@ function OPML.serializeConfiguration(config)
             if san.base_url then
                 table.insert(lines, string.format('            base_url = %q,\n', san.base_url))
             end
+            -- Written even when 0 ("no ceiling"): dropping it here would
+            -- silently restore the default limit on the next rewrite.
+            if tonumber(san.monthly_request_limit) then
+                table.insert(lines, string.format("            monthly_request_limit = %d,\n",
+                    tonumber(san.monthly_request_limit)))
+            end
             table.insert(lines, "        },\n")
         end
         table.insert(lines, "    },\n")
