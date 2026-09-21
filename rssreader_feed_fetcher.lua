@@ -163,7 +163,10 @@ local function parseRSS(content)
     local items = {}
     for raw in content:gmatch("<item[%s>](.-)</item>") do
         local title = sanitize(raw:match("<title[^>]*>(.-)</title>"))
-        local link = stripCData(raw:match("<link[^>]*>(.-)</link>"))
+        -- sanitize() (not bare stripCData) so entity-escaped query strings
+        -- survive: real feeds emit &amp; / &#038; inside <link>, and Atom's
+        -- href already goes through htmlEntitiesToUtf8 in extractAtomLink.
+        local link = sanitize(raw:match("<link[^>]*>(.-)</link>"))
         local description = raw:match("<description[^>]*>(.-)</description>")
         local contentEncoded = raw:match("<content:encoded[^>]*>(.-)</content:encoded>")
         local body = contentEncoded or description

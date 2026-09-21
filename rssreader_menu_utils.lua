@@ -8,7 +8,6 @@ local lfs = require("libs/libkoreader-lfs")
 local qrencode = require("ffi/qrencode")
 local http = require("socket.http")
 local urlmod = require("socket.url")
-local ltn12 = require("ltn12")
 local socketutil = require("socketutil")
 local DataStorage = require("datastorage")
 local NetworkMgr = require("ui/network/manager")
@@ -21,7 +20,8 @@ local InstaparserSanitizer = require("sanitizers/rssreader_sanitizer_instaparser
 local SanitizerQuota = require("sanitizers/rssreader_sanitizer_quota")
 local Trapper = require("ui/trapper")
 local sha2 = require("ffi/sha2")
-local T = require("ffi/util").template
+local ffiUtil = require("ffi/util")
+local T = ffiUtil.template
 
 local utils = {}
 
@@ -881,7 +881,7 @@ function utils.fetchViaHttp(link, on_complete)
     local ok, status_code, _, status_text = http.request{
         url = link,
         method = "GET",
-        sink = ltn12.sink.table(sink),
+        sink = socketutil.table_sink(sink),
         headers = {
             ["Accept-Encoding"] = "identity",
             ["User-Agent"] = "KOReader RSSReader",
@@ -1038,6 +1038,23 @@ function utils.fetchStoryContent(story, builder, on_complete, options)
                 if on_complete then
                     on_complete(content, err, info)
                 end
+            end
+
+            -- Wait out a sanitizer's rate limit (Diffbot's 429 Retry-After).
+            -- Interactive mode parks on UIManager so the progress widget stays
+            -- tappable and a cancel still lands; silent mode has no widget to
+            -- keep alive and yieldToUI() returns immediately there, so it has
+            -- to sleep for real. Returning false aborts the retry.
+            local function sanitizerRetryWait(delay_s)
+                if cancelled then return false end
+                delay_s = tonumber(delay_s) or 0
+                if delay_s <= 0 then return true end
+                if silent then
+                    ffiUtil.sleep(math.ceil(delay_s))
+                    return not cancelled
+                end
+                showProgress(T(_("Sanitizer rate-limited; retrying in %1 s…"), math.ceil(delay_s)))
+                return yieldToUI(delay_s)
             end
 
             local function imageProgressCallback(inum, total)
@@ -1276,17 +1293,17 @@ function utils.fetchStoryContent(story, builder, on_complete, options)
                                 return
                             end
 
-                            local diffbot_html, diffbot_meta = DiffbotSanitizer.parseResponse(content)
-                            if type(diffbot_meta) == "table" then
-                                -- no-op; retained for compatibility, meta ignored currently
-                            end
+                            local diffbot_html = DiffbotSanitizer.parseResponse(content)
                             if not diffbot_html or not DiffbotSanitizer.contentIsMeaningful(diffbot_html) then
                                 processSanitizer(index + 1)
                                 return
                             end
 
                             finalizeContent(diffbot_html, true)
-                        end)
+                        end, {
+                            timeout_ms = DiffbotSanitizer.resolveTimeoutMs(sanitizer),
+                            wait_callback = sanitizerRetryWait,
+                        })
                     elseif sanitizer_type == "instaparser" then
                         InstaparserSanitizer.fetchArticle(sanitizer, link, function(content, err)
                             if cancelled then

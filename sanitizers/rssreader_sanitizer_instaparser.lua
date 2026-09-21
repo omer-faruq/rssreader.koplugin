@@ -66,7 +66,7 @@ function InstaparserSanitizer.fetchArticle(sanitizer, link, on_complete)
         url = endpoint,
         method = "POST",
         source = ltn12.source.string(body_str),
-        sink = ltn12.sink.table(sink),
+        sink = socketutil.table_sink(sink),
         headers = {
             ["Authorization"] = "Bearer " .. token,
             ["Content-Type"] = "application/json",

@@ -1,6 +1,5 @@
 local util = require("util")
 local http = require("socket.http")
-local ltn12 = require("ltn12")
 local socketutil = require("socketutil")
 local logger = require("logger")
 
@@ -102,7 +101,7 @@ function FiveFiltersSanitizer.fetchContent(sanitizer, url, on_complete)
     local ok, status_code, _, status_text = http.request{
         url = url,
         method = "GET",
-        sink = ltn12.sink.table(sink),
+        sink = socketutil.table_sink(sink),
         headers = {
             ["Accept-Encoding"] = "identity",
             ["User-Agent"] = "KOReader RSSReader",
