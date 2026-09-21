@@ -171,6 +171,7 @@ The `features` block in `rssreader_configuration.lua` controls how the plugin fe
 - **`download_images_when_sanitize_successful`** – When the active sanitizer returns cleaned HTML, enable this to download the referenced images alongside the sanitized content. Disable it if you prefer faster syncs or limited storage usage.
 - **`download_images_when_sanitize_unsuccessful`** – Determines whether images should still be fetched when sanitizers fail and the original feed HTML is used instead. Turn it on if you want images even without sanitized content; leave it off to avoid extra downloads in fallback scenarios.
 - **`show_images_in_preview`** – Controls whether images appear in the story preview screen. Disable to prioritize text-only previews or reduce clutter; enable to keep the original illustrations visible while browsing stories.
+- **`image_download_workers`** – How many images are fetched at the same time (default `4`, maximum `8`). Image downloads spend nearly all their time waiting on the network, so fetching several at once makes an image-heavy article land in a fraction of the time. Each worker is a short-lived forked process that writes its image straight to the asset cache; the progress message and tap-to-cancel keep working as before. Set it to `1` to go back to downloading one image after the other (e.g. for a server that dislikes concurrent requests).
 
 ## EPUB Book Metadata
 When a story is saved as EPUB, the plugin fills in the metadata KOReader shows in

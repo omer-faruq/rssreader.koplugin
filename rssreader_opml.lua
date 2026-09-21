@@ -477,6 +477,10 @@ function OPML.serializeConfiguration(config)
             table.insert(lines, string.format("        show_images_in_preview = %s,\n",
                 tostring(config.features.show_images_in_preview)))
         end
+        if tonumber(config.features.image_download_workers) then
+            table.insert(lines, string.format("        image_download_workers = %d,\n",
+                tonumber(config.features.image_download_workers)))
+        end
         table.insert(lines, "    },\n")
     end
 

@@ -3,6 +3,8 @@ local ltn12 = require("ltn12")
 local socketutil = require("socketutil")
 local urlmod = require("socket.url")
 local util = require("util")
+local ffiutil = require("ffi/util")
+local socket = require("socket")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
 local DataStorage = require("datastorage")
@@ -19,6 +21,29 @@ local mimetype_to_extension = {
     ["image/avif"] = "avif",
     ["image/bmp"] = "bmp",
 }
+
+-- Extensions we accept from the URL itself. Anything else (".php", a dotted
+-- path segment, no extension at all) is left to the Content-Type header:
+-- crengine sniffs image format by extension, so a wrong one is worse than
+-- none.
+local known_image_extensions = {
+    jpg = true, jpeg = true, png = true, gif = true, svg = true,
+    webp = true, avif = true, bmp = true, ico = true, tif = true, tiff = true,
+}
+
+local function extensionFromUrl(absolute_src)
+    -- Cut the query and fragment off first: "pic.png?w=600" is a PNG.
+    local path_only = absolute_src:match("^([^%?#]*)")
+    local ext = path_only and path_only:match("%.(%w+)$")
+    if not ext then
+        return nil
+    end
+    ext = ext:lower()
+    if not known_image_extensions[ext] then
+        return nil
+    end
+    return ext
+end
 
 local function matchAttribute(tag, attribute)
     local pattern = attribute:gsub("%-", "%%-")
@@ -174,6 +199,17 @@ end
 local IMAGE_BLOCK_TIMEOUT = 5
 local IMAGE_TOTAL_TIMEOUT = 10
 
+-- Image downloads are latency-bound: nearly all the time of a single request
+-- is spent waiting for DNS, the TCP/TLS handshake and the remote server, so
+-- fetching N images one after the other costs roughly N times the latency of
+-- one. We fan the work out to a few forked worker processes instead (see
+-- downloadTasksInParallel). The image bytes never travel through a pipe:
+-- every worker writes straight to its own file in images_dir, and the parent
+-- picks the results up from the filesystem.
+local DEFAULT_WORKERS = 4
+local MAX_WORKERS = 8
+local POLL_INTERVAL = 0.25 -- seconds between "are the workers done?" checks
+
 local function downloadFile(url, target_path)
     local sink = {}
     socketutil:set_timeout(IMAGE_BLOCK_TIMEOUT, IMAGE_TOTAL_TIMEOUT)
@@ -207,6 +243,185 @@ local function downloadFile(url, target_path)
     file:close()
 
     return headers or {}
+end
+
+local function extensionFromContentType(content_type)
+    if type(content_type) ~= "string" then
+        return nil
+    end
+    -- "image/jpeg; charset=binary" -> "image/jpeg"
+    local mimetype = content_type:lower():match("^%s*([^;%s]+)")
+    if not mimetype then
+        return nil
+    end
+    return mimetype_to_extension[mimetype]
+end
+
+-- Download one task to a temporary ".part" file and only then move it to its
+-- final name. The detour buys us two things: the extension may only be known
+-- from the Content-Type header (crengine sniffs image format by extension),
+-- and a half-written file is never visible under the name the HTML points at
+-- -- which is what lets the parent count finished downloads by listing the
+-- directory while the workers are still running.
+-- Returns the final file name (not the path) and its full path, or nil.
+local function performDownload(task, images_dir)
+    local part_path = task.image_path .. ".part"
+    local headers = downloadFile(task.url, part_path)
+    if not headers then
+        os.remove(part_path)
+        return nil
+    end
+
+    local ext = task.ext
+    if not ext or ext == "" then
+        ext = extensionFromContentType(headers["content-type"])
+    end
+    local filename = (ext and ext ~= "")
+        and string.format("%s.%s", task.imgid, ext)
+        or task.imgid
+    local final_path = string.format("%s/%s", images_dir, filename)
+
+    local ok, err = os.rename(part_path, final_path)
+    if not ok then
+        logger.warn("RSSReader", "Failed to rename image", part_path, err)
+        os.remove(part_path)
+        return nil
+    end
+    return filename, final_path
+end
+
+local function listFinishedFiles(images_dir)
+    local by_imgid = {}
+    local count = 0
+    local ok = pcall(function()
+        for entry in lfs.dir(images_dir) do
+            if entry ~= "." and entry ~= ".." and not entry:find("%.part$") then
+                local imgid = entry:match("^(img%d+)")
+                if imgid then
+                    by_imgid[imgid] = entry
+                    count = count + 1
+                end
+            end
+        end
+    end)
+    if not ok then
+        return {}, 0
+    end
+    return by_imgid, count
+end
+
+-- kill()ed children still have to be reaped. Hand the leftovers to UIManager
+-- (the same approach as Trapper:dismissableRunInSubprocess) instead of
+-- blocking the UI here waiting for them.
+local function collectWorkersLater(pids)
+    if #pids == 0 then
+        return
+    end
+    local ok, UIManager = pcall(require, "ui/uimanager")
+    if not ok or not UIManager then
+        return
+    end
+    local pending = {}
+    for _, pid in ipairs(pids) do
+        table.insert(pending, pid)
+    end
+    local collect
+    collect = function()
+        for i = #pending, 1, -1 do
+            if ffiutil.isSubProcessDone(pending[i]) then
+                table.remove(pending, i)
+            end
+        end
+        if #pending > 0 then
+            UIManager:scheduleIn(5, collect)
+        end
+    end
+    UIManager:scheduleIn(5, collect)
+end
+
+-- Fan the downloads out to `worker_count` forked processes.
+-- Returns ran, cancelled: ran == false means forking is unavailable and the
+-- caller has to fall back to the sequential loop.
+local function downloadTasksInParallel(tasks, images_dir, worker_count, options)
+    if type(ffiutil.runInSubProcess) ~= "function" then
+        return false, false
+    end
+
+    local total = #tasks
+    local progress_callback = options.progress_callback
+    local yield_callback = options.yield_callback
+
+    -- Round-robin, so a worker that draws a slow host does not also get all
+    -- the images that happen to sit next to it in the document.
+    local buckets = {}
+    for i = 1, worker_count do
+        buckets[i] = {}
+    end
+    for i = 1, total do
+        local bucket = buckets[(i - 1) % worker_count + 1]
+        bucket[#bucket + 1] = tasks[i]
+    end
+
+    local pids = {}
+    for _, bucket in ipairs(buckets) do
+        if #bucket > 0 then
+            local pid = ffiutil.runInSubProcess(function()
+                for _, task in ipairs(bucket) do
+                    performDownload(task, images_dir)
+                end
+            end)
+            if pid then
+                pids[#pids + 1] = pid
+            else
+                -- fork() failed: this bucket is on us, right here.
+                logger.warn("RSSReader", "Could not fork image download worker")
+                for _, task in ipairs(bucket) do
+                    performDownload(task, images_dir)
+                end
+            end
+        end
+    end
+
+    local cancelled = false
+    local reported = -1
+    while #pids > 0 do
+        for i = #pids, 1, -1 do
+            if ffiutil.isSubProcessDone(pids[i]) then
+                table.remove(pids, i)
+            end
+        end
+
+        local _, done = listFinishedFiles(images_dir)
+        if progress_callback and done ~= reported then
+            reported = done
+            -- Keep the caller's "image X / N" wording meaningful: report the
+            -- next image being worked on, not the last one that landed.
+            if progress_callback(math.min(done + 1, total), total) == false then
+                cancelled = true
+            end
+        end
+        if cancelled or #pids == 0 then
+            break
+        end
+
+        if yield_callback then
+            if yield_callback(POLL_INTERVAL) == false then
+                cancelled = true
+                break
+            end
+        else
+            socket.sleep(POLL_INTERVAL)
+        end
+    end
+
+    if cancelled then
+        for _, pid in ipairs(pids) do
+            ffiutil.terminateSubProcess(pid)
+        end
+        collectWorkersLater(pids)
+    end
+
+    return true, cancelled
 end
 
 local function resolveUrl(src, base_url)
@@ -297,8 +512,7 @@ function HtmlResources.downloadAndRewrite(html, page_url, asset_paths, options)
 
         local relative_src = seen[absolute_src]
         if not relative_src then
-            local ext = absolute_src:match("%.([%w]+)([%?#].*)?$")
-            if ext then ext = ext:lower() end
+            local ext = extensionFromUrl(absolute_src)
 
             local imgid = string.format("img%05d", imagenum)
             imagenum = imagenum + 1
@@ -327,47 +541,61 @@ function HtmlResources.downloadAndRewrite(html, page_url, asset_paths, options)
     local rewritten = html:gsub("(<%s*[Ii][Mm][Gg][^>]*>)", scanTag)
 
     -- ------------------------------------------------------------
-    -- Phase 2: download. We're now in a regular Lua for-loop, so
-    -- progress_callback may call Trapper:info() and yield safely
-    -- back to UIManager between images. That's what gives the user
-    -- a live "Downloading image X / N …" widget plus tap-to-cancel.
+    -- Phase 2: download. Either in a few forked workers (the default), or,
+    -- when forking is unavailable or a single worker was requested, in a
+    -- plain Lua for-loop. Either way we are out of `string.gsub`, so
+    -- progress_callback may call Trapper:info() and yield safely back to
+    -- UIManager between images. That's what gives the user a live
+    -- "Downloading image X / N ..." widget plus tap-to-cancel.
     -- ------------------------------------------------------------
     local total = #tasks
     local downloads = {}
     local renames = {}
     local cancelled = false
+    local finished = {} -- task -> final file name
 
-    for i, task in ipairs(tasks) do
-        if progress_callback then
-            local go_on = progress_callback(i, total)
-            if go_on == false then
-                cancelled = true
-                break
+    local worker_count = tonumber(options.workers) or DEFAULT_WORKERS
+    worker_count = math.max(1, math.min(MAX_WORKERS, math.floor(worker_count)))
+    worker_count = math.min(worker_count, total)
+
+    local ran_in_parallel = false
+    if worker_count > 1 then
+        local ran, was_cancelled = downloadTasksInParallel(tasks, asset_paths.images_dir, worker_count, options)
+        if ran then
+            ran_in_parallel = true
+            cancelled = was_cancelled
+            local by_imgid = listFinishedFiles(asset_paths.images_dir)
+            for _, task in ipairs(tasks) do
+                finished[task] = by_imgid[task.imgid]
             end
         end
+    end
 
-        local headers = downloadFile(task.url, task.image_path)
-        if headers then
-            -- If we couldn't pick an extension from the URL but the
-            -- server told us via Content-Type, rename the file
-            -- accordingly. crengine sniffs image format by extension.
-            if (not task.ext or task.ext == "") and headers["content-type"] then
-                local resolved_ext = mimetype_to_extension[headers["content-type"]:lower()]
-                if resolved_ext and resolved_ext ~= "" then
-                    local new_filename = string.format("%s.%s", task.imgid, resolved_ext)
-                    local new_path = string.format("%s/%s", asset_paths.images_dir, new_filename)
-                    local ok, err = os.rename(task.image_path, new_path)
-                    if ok then
-                        local new_relative_src = string.format("%s/%s", asset_paths.relative_prefix, new_filename)
-                        renames[task.relative_src] = new_relative_src
-                        task.image_path = new_path
-                        task.relative_src = new_relative_src
-                    else
-                        logger.warn("RSSReader", "Failed to rename image", task.image_path, err)
-                    end
+    if not ran_in_parallel then
+        for i, task in ipairs(tasks) do
+            if progress_callback then
+                local go_on = progress_callback(i, total)
+                if go_on == false then
+                    cancelled = true
+                    break
                 end
             end
+            finished[task] = performDownload(task, asset_paths.images_dir)
+        end
+    end
 
+    -- The name a file ended up with may differ from the one phase 1 wrote
+    -- into the HTML (when the extension could only come from Content-Type),
+    -- so collect those for phase 3.
+    for _, task in ipairs(tasks) do
+        local filename = finished[task]
+        if filename then
+            local relative_src = string.format("%s/%s", asset_paths.relative_prefix, filename)
+            if relative_src ~= task.relative_src then
+                renames[task.relative_src] = relative_src
+                task.relative_src = relative_src
+            end
+            task.image_path = string.format("%s/%s", asset_paths.images_dir, filename)
             downloads[#downloads + 1] = {
                 url = task.url,
                 path = task.image_path,

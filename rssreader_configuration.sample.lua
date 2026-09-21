@@ -119,6 +119,7 @@ return {
         download_images_when_sanitize_successful = true, -- if sanitize functionality is successful, download images
         download_images_when_sanitize_unsuccessful = false, -- if sanitize functionality is unsuccessful, download images (for the original html file)
         show_images_in_preview = true, -- show images in preview screen
+        image_download_workers = 4, -- how many images to download at the same time (1 = one after the other)
         sanitized_save_path = nil, -- path to save sanitized links, if nil uses default_folder_on_save, then home folder
     },
 }

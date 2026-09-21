@@ -601,6 +601,13 @@ function utils.getFeatureFlag(builder, key)
     return util.tableGetValue(builder.accounts.config, "features", key)
 end
 
+-- How many forked workers HtmlResources may use to download images in
+-- parallel. nil lets HtmlResources pick its own default; 1 restores the old
+-- one-image-at-a-time behavior.
+function utils.getImageDownloadWorkers(builder)
+    return tonumber(utils.getFeatureFlag(builder, "image_download_workers"))
+end
+
 function utils.shouldDownloadImages(builder, sanitized_successful)
     local key = sanitized_successful and "download_images_when_sanitize_successful" or "download_images_when_sanitize_unsuccessful"
     local flag = utils.getFeatureFlag(builder, key)
@@ -1086,6 +1093,17 @@ function utils.fetchStoryContent(story, builder, on_complete, options)
                     if asset_paths then
                         local rewritten, assets = HtmlResources.downloadAndRewrite(raw_html, link, asset_paths, {
                             progress_callback = imageProgressCallback,
+                            -- Parallel downloads run in forked workers; this
+                            -- is how the parent's polling loop waits without
+                            -- freezing the UI (and notices a cancel tap).
+                            -- Left nil in silent mode, where there is no
+                            -- widget to keep responsive and yieldToUI()
+                            -- returns immediately: HtmlResources then sleeps
+                            -- between polls instead of busy-looping.
+                            yield_callback = (not silent) and function(delay_s)
+                                return yieldToUI(delay_s)
+                            end or nil,
+                            workers = utils.getImageDownloadWorkers(builder),
                         })
                         if rewritten then
                             raw_html = rewritten
