@@ -236,6 +236,7 @@ function MenuBuilder:_updateFeedCache(context)
         menu_page = context.menu_instance and context.menu_instance.page or feed_node._rss_menu_page,
         current_page = feed_node._rss_page,
         has_more = feed_node._rss_has_more,
+        continuation = feed_node._rss_continuation,
     })
 end
 

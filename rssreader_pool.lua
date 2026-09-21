@@ -109,7 +109,7 @@ local function serializeStory(story)
         "story_hash", "hash", "guid", "story_id", "id",
         "author", "creator", "feed_title", "feed_id",
         "date", "timestamp", "created_on_time", "updated", "published", "pubDate",
-        "read_status", "read", "story_read",
+        "read_status", "read", "story_read", "starred",
         "preview_image", "primary_image", "story_image", "image", "thumbnail",
         "media_thumbnail", "media_content", "image_urls",
         "_rss_is_read", "_rss_marked_read",

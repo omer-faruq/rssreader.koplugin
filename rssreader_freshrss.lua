@@ -13,6 +13,13 @@ FreshRSS.__index = FreshRSS
 
 local USER_AGENT = "KOReader RSSReader"
 
+-- Google Reader API state tags. FreshRSS keeps "read" and "starred"
+-- (favourite) as tags on an entry, set and cleared through the same
+-- edit-tag endpoint.
+local READ_TAG = "user/-/state/com.google/read"
+-- Also the id of the stream that lists every favourite.
+local STARRED_TAG = "user/-/state/com.google/starred"
+
 local function requestWithScheme(options)
     local parsed_url = url.parse(options.url)
     local scheme = parsed_url and parsed_url.scheme or "http"
@@ -50,6 +57,20 @@ local function encodeQuery(params)
         return "?" .. table.concat(components, "&")
     end
     return ""
+end
+
+-- Stream ids are path *structure*, not one opaque value: FreshRSS feed ids
+-- look like "feed/221" (Google Reader style servers use "feed/http://…")
+-- and folders like "user/-/label/News". url.escape() would turn those
+-- separators into %2F, which most web servers refuse to decode inside a
+-- path (Apache's AllowEncodedSlashes is Off by default), so the request
+-- comes back as a 404. Escape only what has to be escaped and leave the
+-- path separators — and the sub-delims that are legal in a path segment —
+-- alone.
+local function escapeStreamId(stream_id)
+    return (tostring(stream_id):gsub("[^%w%-%._~/:@]", function(char)
+        return string.format("%%%02X", string.byte(char))
+    end))
 end
 
 local function sanitizeBaseUrl(raw)
@@ -344,10 +365,12 @@ end
 local function normalizeEntry(entry)
     if type(entry) ~= "table" then return {} end
     local is_read = false
+    local is_starred = false
     for _, category in ipairs(entry.categories or {}) do
         if category:find("/state/com.google/read$") then
             is_read = true
-            break
+        elseif category:find("/state/com.google/starred$") then
+            is_starred = true
         end
     end
 
@@ -374,6 +397,7 @@ local function normalizeEntry(entry)
         read = is_read,
         read_status = is_read,
         story_read = is_read,
+        starred = is_starred,
         author = entry.author,
     }
 end
@@ -387,7 +411,7 @@ function FreshRSS:fetchStories(feed_id, options)
 
     local query = {
         output = "json",
-        n = 15, -- Number of items to fetch unless override by is_special_feed = true
+        n = tonumber(options.n) or 15, -- how many items to fetch per page
     }
     if options.continuation then
         query.c = options.continuation
@@ -400,24 +424,32 @@ function FreshRSS:fetchStories(feed_id, options)
  
     if options.read_filter == "unread_only" then
         -- 'xt' means "exclude tag". We exclude items with the "read" state.
-        query.xt = "user/-/state/com.google/read"
+        query.xt = READ_TAG
     elseif options.read_filter == "read_only" then
         -- 'it' means "include tag".
-        query.it = "user/-/state/com.google/read"
+        query.it = READ_TAG
     end
 
-    -- We fetch unread first, then all. FreshRSS doesn't have a simple page number.
-    -- This implementation is simple and just fetches the latest 50.
-    -- A real implementation would need to handle the 'c' (continuation) param.
+    -- FreshRSS has no page numbers: the caller pages by handing back the
+    -- continuation token from the previous response (options.continuation).
 
-    local ok, data_or_err = self:authorizedRequest("GET", "/api/greader.php/reader/api/0/stream/contents/" .. url.escape(feed_id), query)
+    local ok, data_or_err = self:authorizedRequest("GET", "/api/greader.php/reader/api/0/stream/contents/" .. escapeStreamId(feed_id), query)
     if not ok then
         return false, data_or_err
     end
 
+    -- Everything that is not a single feed ("feed/…") aggregates entries from
+    -- several feeds: the starred list, the reading list, a label. Flag those
+    -- so the story list prefixes each entry with the feed it came from.
+    local is_aggregated_stream = not tostring(feed_id):match("^feed/")
+
     local stories = {}
     for _, entry in ipairs(data_or_err.items or {}) do
-        table.insert(stories, normalizeEntry(entry))
+        local story = normalizeEntry(entry)
+        if is_aggregated_stream then
+            story._from_virtual_feed = true
+        end
+        table.insert(stories, story)
     end
 
     return true, {
@@ -464,15 +496,29 @@ function FreshRSS:markStory(story, add_tag, remove_tag)
 end
 
 function FreshRSS:markStoryAsRead(feed_id, story)
-    return self:markStory(story, "user/-/state/com.google/read", nil)
+    return self:markStory(story, READ_TAG, nil)
 end
 
 function FreshRSS:markStoryAsUnread(feed_id, story)
-    return self:markStory(story, nil, "user/-/state/com.google/read")
+    return self:markStory(story, nil, READ_TAG)
 end
 
 function FreshRSS:markFeedAsRead(feed_id)
-    return self:markStory({ id = feed_id }, "user/-/state/com.google/read", nil)
+    return self:markStory({ id = feed_id }, READ_TAG, nil)
+end
+
+-- Favourites. The generic story menu shows the Star / Unstar button, and the
+-- story list its star prefix, for any client exposing this pair.
+function FreshRSS:markStoryAsStarred(feed_id, story)
+    return self:markStory(story, STARRED_TAG, nil)
+end
+
+function FreshRSS:markStoryAsUnstarred(feed_id, story)
+    return self:markStory(story, nil, STARRED_TAG)
+end
+
+function FreshRSS:getStarredStreamId()
+    return STARRED_TAG
 end
 
 return FreshRSS

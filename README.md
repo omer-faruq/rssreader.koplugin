@@ -30,7 +30,7 @@ CommaFeed offers the most comprehensive feature set for RSS reading on KOReader:
 - ✅ **Starring** – Star/unstar articles, synced through CommaFeed's API
 - ✅ **Tags** – Browse articles by tag and edit a story's tags directly, synced through CommaFeed's API
 
-Other services like NewsBlur, FreshRSS, and Miniflux are fully supported with similar features. Miniflux provides native API support with folder/category organization and mark as read functionality.
+Other services like NewsBlur, FreshRSS, and Miniflux are fully supported with similar features. FreshRSS additionally supports favourites (starring). Miniflux provides native API support with folder/category organization and mark as read functionality.
 
 ## Files You Need to Edit
 - **`rssreader_configuration.sample.lua` → rename to `rssreader_configuration.lua`**: Describe your accounts and per-account preferences.
@@ -74,12 +74,13 @@ NewsBlur, CommaFeed, Miniflux, and Fever API accounts include special virtual fe
 - **CommaFeed & Miniflux**: Virtual feeds support "Mark all as read" functionality. Long-press a virtual feed to mark all stories in that view as read.
 - **NewsBlur & Fever API**: Virtual feeds cannot be marked as read in bulk. Use individual feeds for "Mark all as read" functionality.
 
-## Starring Articles (CommaFeed)
-CommaFeed accounts support starring/unstarring individual articles, synced through CommaFeed's API:
+## Starring Articles (CommaFeed, FreshRSS)
+CommaFeed and FreshRSS accounts support starring/unstarring individual articles, synced through their APIs (FreshRSS calls them favourites and keeps them as the `user/-/state/com.google/starred` tag):
 - Long-press a story → **Star** / **Unstar** (next to **Add to List**), or use the star button in the story preview toolbar
 - Starred stories show a ★ prefix in the title
-- A **★ Starred** virtual feed appears at the top of the root feed list, aggregating every starred article across your CommaFeed subscriptions
-- Not yet available for NewsBlur, FreshRSS, Miniflux, or Fever API accounts
+- A starred virtual feed aggregates every starred article across your subscriptions: **★ Starred** at the top of the root feed list on CommaFeed, **Starred** among the special feeds on FreshRSS
+- On FreshRSS that feed also lists articles you have already read, since a favourite stays a favourite after reading; the other FreshRSS special feeds stay filtered to unread
+- Not yet available for NewsBlur, Miniflux, or Fever API accounts
 
 ## Tags (CommaFeed)
 CommaFeed accounts support browsing and editing per-article tags:

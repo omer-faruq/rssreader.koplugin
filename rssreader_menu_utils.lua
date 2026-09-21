@@ -462,6 +462,8 @@ function utils.persistFeedState(menu_instance, feed_node)
         menu_page = menu_instance.page,
         current_page = feed_node._rss_page or 0,
         has_more = feed_node._rss_has_more or false,
+        -- FreshRSS pages with a continuation token; nil for every other backend.
+        continuation = feed_node._rss_continuation,
         stories = stories_copy,
         story_keys = story_keys_copy,
     })

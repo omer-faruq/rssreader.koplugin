@@ -1095,6 +1095,21 @@ function backends.showFreshRSSAccount(self, account, opts)
             feed = { unreadCount = 0 },
         })
 
+        table.insert(children, {
+            kind = "feed",
+            id = "freshrss_starred",
+            title = _("Starred"),
+            -- FreshRSS keeps favourites in their own stream.
+            api_feed_id = (type(client.getStarredStreamId) == "function"
+                and client:getStarredStreamId())
+                or "user/-/state/com.google/starred",
+            is_special_feed = true,
+            -- A favourite stays a favourite after it has been read, so this
+            -- is the one special feed that must not be filtered to unread.
+            read_filter_override = "all",
+            feed = { unreadCount = 0 },
+        })
+
         if account.special_feeds and type(account.special_feeds) == "table" then
             for _, special_feed in ipairs(account.special_feeds) do
                 if special_feed.id then
@@ -1229,8 +1244,9 @@ function backends.showFreshRSSFeed(self, account, client, feed_node, opts)
     local fetch_options = {}
  
     if is_special_feed then  
-        -- Apply unread filter for all special feeds  
-        fetch_options.read_filter = "unread_only"  
+        -- Apply unread filter for all special feeds, unless the node opts out
+        -- (the Starred stream lists read favourites too).
+        fetch_options.read_filter = feed_node.read_filter_override or "unread_only"  
         fetch_options.n = 15
         
         -- Only apply time filter for the "Today" feed  
@@ -1251,6 +1267,7 @@ function backends.showFreshRSSFeed(self, account, client, feed_node, opts)
                 feed_node._rss_story_keys = util.tableDeepCopy(stored_state.story_keys or {})
                 feed_node._rss_page = stored_state.current_page or feed_node._rss_page
                 feed_node._rss_has_more = stored_state.has_more or feed_node._rss_has_more
+                feed_node._rss_continuation = stored_state.continuation or feed_node._rss_continuation
             end
             if type(stored_state.menu_page) == "number" then
                 feed_node._rss_menu_page = feed_node._rss_menu_page or stored_state.menu_page
@@ -1395,6 +1412,21 @@ function backends.showFreshRSSFeed(self, account, client, feed_node, opts)
             if not fetch_options.page then
                 fetch_options.page = fetch_page
             end
+            -- FreshRSS paginates with an opaque continuation token rather than
+            -- page numbers: without passing it back, "More" would just fetch
+            -- the first page again (and the dedup would silently drop it).
+            if fetch_page > 1 then
+                if feed_node._rss_continuation then
+                    fetch_options.continuation = feed_node._rss_continuation
+                else
+                    feed_node._rss_has_more = false
+                    UIManager:show(InfoMessage:new{
+                        text = _("No more stories available."),
+                    })
+                    finalizeMenu()
+                    return
+                end
+            end
             -- Make sure to use api_fetch_id and pass fetch_options
             local ok, data_or_err = client:fetchStories(api_fetch_id, fetch_options)
             
@@ -1405,6 +1437,7 @@ function backends.showFreshRSSFeed(self, account, client, feed_node, opts)
                 return
             end
             local batch = (data_or_err and data_or_err.stories) or {}
+            feed_node._rss_continuation = data_or_err and data_or_err.continuation or nil
             if fetch_page == 1 then
                 feed_node._rss_stories = {}
                 feed_node._rss_story_keys = {}
