@@ -195,6 +195,13 @@ asset cache — so richer metadata never costs an extra request.
   pixel size looks like an illustration rather than an icon or a banner strip,
   measured by reading PNG/GIF/JPEG headers off disk. Requires image downloads to
   be enabled.
+- **Designed cover** – on by default (**Settings → Designed EPUB cover**), the
+  plugin paints its own cover instead of using the lead image bare: the title on
+  top, the lead image cropped into a landscape band in the middle, and the
+  byline plus feed name at the bottom. Articles with no usable image get a
+  text-only cover, so every saved story has a readable spine in the library. The
+  image used is the one already picked above, downloaded once and reused for the
+  article body. Switch it off to keep the plain lead-image cover.
 - **Chapters** – the article's `<h1>`–`<h6>` get anchors and the EPUB carries a
   nested table of contents. Heading levels are normalized, so an article built
   out of `<h2>`/`<h3>` still starts at TOC depth 1.

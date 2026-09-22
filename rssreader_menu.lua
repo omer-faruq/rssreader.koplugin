@@ -1803,6 +1803,7 @@ end
 
 function MenuBuilder:showSettingsPopup()
     local show_newsblur_all = G_reader_settings:nilOrTrue("rssreader_newsblur_show_all_feeds")
+    local designed_cover = G_reader_settings:nilOrTrue("rssreader_designed_cover")
     
     local dialog
     dialog = ButtonDialog:new{
@@ -1845,6 +1846,22 @@ function MenuBuilder:showSettingsPopup()
                     if utils.ReaderReturn then
                         pcall(utils.ReaderReturn.showSettings)
                     end
+                end,
+            }},
+            {{
+                text = designed_cover and "✓ " .. _("Designed EPUB cover") or _("Designed EPUB cover"),
+                background = Blitbuffer.COLOR_WHITE,
+                align = "left",
+                callback = function()
+                    UIManager:close(dialog)
+                    local new_value = not designed_cover
+                    G_reader_settings:saveSetting("rssreader_designed_cover", new_value)
+                    UIManager:show(InfoMessage:new{
+                        text = new_value
+                            and _("Saved articles get a cover with their title, lead image and byline.")
+                            or _("Saved articles use the article's own lead image as the cover."),
+                        timeout = 3,
+                    })
                 end,
             }},
             {{

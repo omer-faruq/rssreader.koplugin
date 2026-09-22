@@ -580,6 +580,59 @@ function EpubDownloadBackend:createEpub(epub_path, html, url, include_images, me
     local toc_depth = EpubMetadata.normalizeLevels(toc_entries)
 
     UI:info(T(_("%1\n\nBuilding EPUB…"), message))
+
+    -- Designed cover: title + lead image + byline painted into a bitmap of
+    -- our own, so a feed article looks like a book in the library instead of
+    -- showing a bare photo (or nothing at all). On by default; with it off the
+    -- lead image is used as the cover as before. The one image the cover needs
+    -- is kept on its record, so the loop below writes it without fetching it
+    -- a second time.
+    local cover_png
+    if G_reader_settings:nilOrTrue("rssreader_designed_cover") then
+        local lead
+        if cover_imgid then
+            for _, img in ipairs(images) do
+                if img.imgid == cover_imgid then
+                    if img.mimetype ~= "image/svg+xml" then
+                        local content
+                        if img.local_path then
+                            local f = io.open(img.local_path, "rb")
+                            if f then
+                                content = f:read("*a")
+                                f:close()
+                            end
+                        else
+                            UI:info((message and message ~= "" and message .. "\n\n" or "") .. _("Building cover…"))
+                            local ok_dl, dl = getUrlContent(img.src)
+                            if ok_dl then content = dl end
+                        end
+                        if content and content ~= "" then
+                            img.content = content
+                            local iw, ih = EpubMetadata.imageDimensions(content)
+                            lead = { content = content, mimetype = img.mimetype, w = iw, h = ih }
+                        end
+                    end
+                    break
+                end
+            end
+        end
+        local ok_cover, Cover = pcall(require, "rssreader_cover")
+        if ok_cover and Cover then
+            local util = require("util")
+            local err_cover
+            cover_png, err_cover = Cover.build(util.htmlEntitiesToUtf8(page_htmltitle),
+                                               page_author, page_feed, lead,
+                                               epub_path .. ".cover.png")
+            if not cover_png then
+                logger.info("EpubDownloadBackend: designed cover skipped", err_cover)
+            end
+        else
+            logger.info("EpubDownloadBackend: cover module unavailable", Cover)
+        end
+        lead = nil
+        collectgarbage()
+    end
+
     -- Open the zip file (with .tmp for now, as crengine may still
     -- have a handle to the final epub_path, and we don't want to
     -- delete a good one if we fail/cancel later)
@@ -628,7 +681,9 @@ function EpubDownloadBackend:createEpub(epub_path, html, url, include_images, me
     local content_opf_parts = {}
     -- head
     local meta_cover = "<!-- no cover image -->"
-    if include_images and cover_imgid then
+    if cover_png then
+        meta_cover = [[<meta name="cover" content="cover"/>]]
+    elseif include_images and cover_imgid then
         meta_cover = string.format([[<meta name="cover" content="%s"/>]], cover_imgid)
     end
     logger.dbg("meta_cover:", meta_cover)
@@ -664,6 +719,11 @@ function EpubDownloadBackend:createEpub(epub_path, html, url, include_images, me
     <item id="content" href="content.html" media-type="application/xhtml+xml"/>
     <item id="css" href="stylesheet.css" media-type="text/css"/>
 ]], page_htmltitle, author_meta, Version:getCurrentRevision(), meta_cover))
+    -- the painted cover, which is ours and not one of the article's images
+    if cover_png then
+        table.insert(content_opf_parts,
+            [[    <item id="cover" href="images/cover.png" media-type="image/png"/>]] .. "\n")
+    end
     -- images files
     if include_images then
         for inum, img in ipairs(images) do
@@ -742,6 +802,10 @@ function EpubDownloadBackend:createEpub(epub_path, html, url, include_images, me
 
     -- ----------------------------------------------------------------
     -- OEBPS/images/*
+    if cover_png then
+        epub:addFileFromMemory("OEBPS/images/cover.png", cover_png, true, mtime)
+        cover_png = nil
+    end
     if include_images then
         local nb_images = #images
         local before_images_time = time.now()
@@ -766,7 +830,11 @@ function EpubDownloadBackend:createEpub(epub_path, html, url, include_images, me
                 src = img.src2x
             end
             local success, content
-            if img.local_path then
+            if img.content then
+                -- Already in hand: this is the image the cover was painted from.
+                content, img.content = img.content, nil
+                success = true
+            elseif img.local_path then
                 logger.dbg("Reading img from disk ", img.local_path)
                 local f = io.open(img.local_path, "rb")
                 if f then
