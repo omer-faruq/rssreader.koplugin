@@ -262,8 +262,8 @@ function ReaderReturn.returnToList(plugin)
         return false
     end
     -- The RSS menus are plain widgets shown by UIManager, so they simply stack
-    -- on top of the reader: closing the list drops the user straight back into
-    -- the article, at the position they left it. Opening another story from
+    -- on top of the reader; leaving the list at root level closes the article
+    -- too (closeArticle), otherwise the two would loop. Opening another story from
     -- there goes through ReaderUI:showReader(), which tears this reader down
     -- for us. force_restore because an article can easily be read for longer
     -- than the 30 min freshness window of the saved feed state.
@@ -271,6 +271,37 @@ function ReaderReturn.returnToList(plugin)
         plugin:openAccountList({ force_restore = true })
     end)
     return ok
+end
+
+-- The flip side of returnToList: when the user leaves the RSS list for good
+-- (root level Back/Close), the article underneath would otherwise pop back up,
+-- and its only way out is back into the list -- a loop. Close the article too
+-- and land in the file browser. Synchronous on purpose: UIManager repaints
+-- before running a nextTick task, so a deferred close would flash the article
+-- first. Safe here because we run inside the RSS menu's event handler, not
+-- inside ReaderUI's own (which is why ReaderStatus defers).
+function ReaderReturn.closeArticle(plugin)
+    if not plugin or not plugin._rss_return_active then
+        return false
+    end
+    local ui = plugin.ui
+    if not ui or not ui.document or ui.tearing_down then
+        return false
+    end
+    local ReaderUI = require("apps/reader/readerui")
+    if ReaderUI.instance ~= ui then
+        return false
+    end
+    return (try("closing the article", function()
+        -- The article's own folder is the RSS cache; the home folder is
+        -- where the user actually wants to be.
+        local home_dir = G_reader_settings:readSetting("home_dir")
+        if home_dir then
+            ui.last_dir_for_file_browser = home_dir
+        end
+        ui:onClose()
+        ui:showFileManager()
+    end))
 end
 
 --------------------------------------------------------------------

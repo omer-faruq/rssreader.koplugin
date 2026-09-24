@@ -757,6 +757,14 @@ function RSSReader:updateBackButton(menu_instance)
     hookBackButtonIntoLayout(menu_instance)
 end
 
+-- Leaving the list at root level while it sits on top of an article opened
+-- from it: close that article too, see ReaderReturn.closeArticle.
+function RSSReader:leaveArticleUnderneath()
+    if ReaderReturn and self._rss_return_active then
+        pcall(ReaderReturn.closeArticle, self)
+    end
+end
+
 function RSSReader:goBackFromMenu(menu_instance)
     if menu_instance and menu_instance._rss_is_root_menu then
         if self.current_menu_info and self.current_menu_info.menu == menu_instance then
@@ -764,6 +772,7 @@ function RSSReader:goBackFromMenu(menu_instance)
         end
         self.history = {}
         UIManager:close(menu_instance)
+        self:leaveArticleUnderneath()
         return
     end
 
@@ -781,6 +790,11 @@ function RSSReader:onMenuClosed(menu_instance)
         if not self.closing_for_navigation and menu_instance._rss_is_root_menu then
             self.history = {}
         end
+    end
+    -- close_callback only fires on the user's Close (X), which leaves the RSS
+    -- list at whatever level it was, not just at root.
+    if not self.closing_for_navigation then
+        self:leaveArticleUnderneath()
     end
 end
 
@@ -837,6 +851,7 @@ function RSSReader:goBack()
             UIManager:close(self.current_menu_info.menu)
             self.current_menu_info = nil
         end
+        self:leaveArticleUnderneath()
         return
     end
 
