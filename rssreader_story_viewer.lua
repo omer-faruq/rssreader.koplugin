@@ -375,28 +375,44 @@ local function buildToolbarButtons(story, on_action, close_handler, include_clos
                 disabled = not story.permalink,
             },
             {
-                text = _("Next"),
+                text = _("Previous"),
                 background = Blitbuffer.COLOR_WHITE,
                 callback = function()
+                    -- Open the other story first, over this one, so the list
+                    -- underneath is not painted in between.
+                    on_action("prev_story", story)
                     if close_handler then
                         close_handler()
                     end
+                end,
+            },
+            {
+                text = _("Next"),
+                background = Blitbuffer.COLOR_WHITE,
+                callback = function()
+                    -- Open the other story first, over this one, so the list
+                    -- underneath is not painted in between.
                     on_action("next_story", story)
+                    if close_handler then
+                        close_handler()
+                    end
                 end,
             },
         }
         if disable_mutators then
-            navigation_row[2].disabled = false
+            navigation_row[3].disabled = false
         end
         if not disable_mutators then
             table.insert(navigation_row, {
                 text = _("Next unread"),
                 background = Blitbuffer.COLOR_WHITE,
                 callback = function()
+                    -- Open the other story first, over this one, so the list
+                    -- underneath is not painted in between.
+                    on_action("next_unread", story)
                     if close_handler then
                         close_handler()
                     end
-                    on_action("next_unread", story)
                 end,
             })
         end
@@ -447,10 +463,16 @@ local function writeHtmlDocument(html_body, filepath, title)
     return true
 end
 
+-- Unique per preview, so two previews opened within the same second (the next
+-- one is opened before the current one is closed) never share temp files.
+local function nextTempCounter()
+    story_temp_counter = (story_temp_counter + 1) % 100000
+    return story_temp_counter
+end
+
 local function writeHtmlToTempFile(html, title)
     local temp_dir = ensureTempDirectory()
-    story_temp_counter = (story_temp_counter + 1) % 100000
-    local filename = string.format("story_%d_%d.html", os.time(), story_temp_counter)
+    local filename = string.format("story_%d_%d.html", os.time(), nextTempCounter())
     local filepath = temp_dir .. "/" .. filename
     if writeHtmlDocument(html, filepath, title) then
         return filepath
@@ -516,7 +538,68 @@ function StoryViewer:_showFallback(story, on_action, on_close, options)
     end
 end
 
+-- Settings > Page keys at article edges: "off", "next" or "next_unread".
+local STORY_NAV_KEYS_SETTING = "rssreader_story_nav_keys"
+
+function StoryViewer.getStoryNavKeysMode()
+    return G_reader_settings:readSetting(STORY_NAV_KEYS_SETTING, "next")
+end
+
+function StoryViewer.setStoryNavKeysMode(mode)
+    G_reader_settings:saveSetting(STORY_NAV_KEYS_SETTING, mode)
+end
+
+-- Page keys past the article's edges move to the next/previous article.
+-- ScrollHtmlWidget handles PgFwd/PgBack itself while it can still turn a page
+-- and lets the key propagate up to the dialog only on the last/first page, so
+-- these bindings never steal a page turn.
+local function installStoryNavKeys(viewer_dialog, story, on_action, close_viewer)
+    local mode = StoryViewer.getStoryNavKeysMode()
+    if not on_action or mode == "off" then
+        return
+    end
+    local function navigate(direction)
+        local action
+        if direction > 0 then
+            action = mode == "next_unread" and "next_unread" or "next_story"
+        else
+            action = mode == "next_unread" and "prev_unread" or "prev_story"
+        end
+        -- Over this one first, see the toolbar's Next.
+        on_action(action, story)
+        close_viewer()
+        return true
+    end
+    viewer_dialog.key_events.RssNextStory = { { Input.group.PgFwd } }
+    viewer_dialog.key_events.RssPrevStory = { { Input.group.PgBack } }
+    viewer_dialog.onRssNextStory = function()
+        return navigate(1)
+    end
+    viewer_dialog.onRssPrevStory = function()
+        return navigate(-1)
+    end
+end
+
+-- Building the preview (sanitizing, downloading images, rendering the HTML)
+-- takes long enough on an e-reader to look like a hang: say so meanwhile.
 function StoryViewer:showStory(story, on_action, on_close, options)
+    local loading = InfoMessage:new{
+        text = _("Loading article…"),
+        dismissable = false,
+    }
+    UIManager:show(loading)
+    UIManager:forceRePaint()
+    local ok, err = pcall(self._showStoryNow, self, story, on_action, on_close, options)
+    UIManager:close(loading)
+    if not ok then
+        logger.err("RSSReader: showing story failed:", err)
+        UIManager:show(InfoMessage:new{
+            text = _("Could not open story."),
+        })
+    end
+end
+
+function StoryViewer:_showStoryNow(story, on_action, on_close, options)
     if type(story) ~= "table" then
         UIManager:show(InfoMessage:new{
             text = _("Could not open story."),
@@ -627,7 +710,7 @@ function StoryViewer:showStory(story, on_action, on_close, options)
             html = rewriteRelativeResourceUrls(html, story_link)
         end
 
-        local asset_paths = HtmlResources.prepareAssetPaths(temp_dir, string.format("preview_%d", os.time()))
+        local asset_paths = HtmlResources.prepareAssetPaths(temp_dir, string.format("preview_%d_%d", os.time(), nextTempCounter()))
         if asset_paths then
             local rewritten, assets = HtmlResources.downloadAndRewrite(html, story_link, asset_paths)
             if rewritten and rewritten ~= "" then
@@ -759,6 +842,7 @@ function StoryViewer:showStory(story, on_action, on_close, options)
             closeAll()
             return true
         end
+        installStoryNavKeys(viewer_dialog, story, on_action, closeAll)
     end
 
     html_widget.dialog = viewer_dialog

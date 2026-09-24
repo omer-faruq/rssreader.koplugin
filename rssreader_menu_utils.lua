@@ -166,6 +166,23 @@ function utils.findNextIndex(stories, start_index, predicate)
     return nil
 end
 
+-- findNextIndex's mirror image: wraps around the start of the list.
+function utils.findPrevIndex(stories, start_index, predicate)
+    if not stories or #stories == 0 then
+        return nil
+    end
+
+    local total = #stories
+    for offset = 1, total do
+        local candidate = ((start_index - offset - 1) % total) + 1
+        local story = stories[candidate]
+        if predicate(story) then
+            return candidate
+        end
+    end
+    return nil
+end
+
 -- A Menu with a refresh icon in the title bar's left corner. The icon has to be
 -- set at construction time; Menu also maps the hardware Menu key to it, which
 -- is how key-only devices reach it.

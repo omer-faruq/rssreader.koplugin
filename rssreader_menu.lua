@@ -301,6 +301,21 @@ function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
         return
     end
 
+    if action == "prev_story" or action == "prev_unread" then
+        local only_unread = action == "prev_unread"
+        local prev_index = utils.findPrevIndex(stories, index, function(candidate)
+            return not only_unread or utils.isUnread(candidate)
+        end)
+        if prev_index then
+            self:showStory(stories, prev_index, function(prev_action, prev_payload)
+                self:handleStoryAction(stories, prev_index, prev_action, prev_payload, context)
+            end, nil, nil, context)
+        elseif only_unread then
+            UIManager:show(InfoMessage:new{ text = _("No unread stories found.") })
+        end
+        return
+    end
+
     if action == "open_link" then
         local link = payload
         if link and util.openFileWithCRE then
@@ -1866,6 +1881,15 @@ function MenuBuilder:showSettingsPopup()
                 end,
             }},
             {{
+                text = _("Page keys at article edges"),
+                background = Blitbuffer.COLOR_WHITE,
+                align = "left",
+                callback = function()
+                    UIManager:close(dialog)
+                    self:showStoryNavKeysPopup()
+                end,
+            }},
+            {{
                 text = _("Link popup"),
                 background = Blitbuffer.COLOR_WHITE,
                 align = "left",
@@ -2115,6 +2139,33 @@ function MenuBuilder:showStartViewPopup()
     dialog = ButtonDialog:new{
         title = _("Open on startup") .. "\n" .. _("Long-press a feed or folder to pick your own."),
         buttons = buttons,
+    }
+    UIManager:show(dialog)
+end
+
+-- What the page keys do on an article preview's last (first) page.
+function MenuBuilder:showStoryNavKeysPopup()
+    local current = StoryViewer.getStoryNavKeysMode()
+    local dialog
+    local function choice(mode, text)
+        return {{
+            text = current == mode and ("✓ " .. text) or text,
+            background = Blitbuffer.COLOR_WHITE,
+            align = "left",
+            callback = function()
+                StoryViewer.setStoryNavKeysMode(mode)
+                UIManager:close(dialog)
+            end,
+        }}
+    end
+    dialog = ButtonDialog:new{
+        title = _("Page keys at article edges") .. "\n"
+            .. _("On the last page, press twice to go to the next article; on the first page, to the previous one."),
+        buttons = {
+            choice("off", _("Do nothing")),
+            choice("next", _("Next / previous article")),
+            choice("next_unread", _("Next / previous unread article")),
+        },
     }
     UIManager:show(dialog)
 end
@@ -2689,6 +2740,26 @@ function MenuBuilder:handlePoolStoryAction(stories, index, action, payload)
 
     if action == "next_unread" then
         for i = index + 1, #stories do
+            if not stories[i]._pool_read then
+                self:poolShowStoryPreview(stories, i)
+                return
+            end
+        end
+        UIManager:show(InfoMessage:new{ text = _("No unread stories found."), timeout = 2 })
+        return
+    end
+
+    if action == "prev_story" then
+        if index > 1 then
+            self:poolShowStoryPreview(stories, index - 1)
+        else
+            UIManager:show(InfoMessage:new{ text = _("No previous stories."), timeout = 2 })
+        end
+        return
+    end
+
+    if action == "prev_unread" then
+        for i = index - 1, 1, -1 do
             if not stories[i]._pool_read then
                 self:poolShowStoryPreview(stories, i)
                 return
