@@ -16,12 +16,33 @@ local utils = require("rssreader_menu_utils")
 
 local backends = {}
 
+-- The "Open on startup" setting: walk from the root just shown down to the
+-- target, opening each folder on the way so Back climbs back up through them.
+-- All of it runs before the next repaint, so only the last menu is painted.
+local function openStartTarget(self, account, client, root, target, show_node, show_feed)
+    local path = utils.findTreePath(root, target)
+    if not path then
+        utils.showStartTargetMissing(target)
+        return
+    end
+    for _i, node in ipairs(path) do
+        if node.kind == "folder" then
+            show_node(self, account, client, node)
+        else
+            show_feed(self, account, client, node)
+        end
+    end
+end
+
 -- After a refresh (opts.focus/opts.replace from a tree menu's refresh icon),
 -- show the folder the user was in, found again in the new tree, in place of
 -- the old menu. Falls back to the root if that folder is gone.
-local function showFetchedTree(self, account, client, tree, opts, show_node)
-    local target = utils.findTreeFolder(tree, opts.focus) or tree
-    show_node(self, account, client, target, { replace = opts.replace })
+local function showFetchedTree(self, account, client, tree, opts, show_node, show_feed)
+    local shown = utils.findTreeFolder(tree, opts.focus) or tree
+    show_node(self, account, client, shown, { replace = opts.replace })
+    if opts.start_target then
+        openStartTarget(self, account, client, shown, opts.start_target, show_node, show_feed)
+    end
 end
 
 -- Back into a tree menu: resolve the node in the latest tree, so a refresh
@@ -415,7 +436,7 @@ function backends.showNewsBlurAccount(self, account, opts)
             return
         end
 
-        showFetchedTree(self, account, client, tree_or_err, opts, backends.showNewsBlurNode)
+        showFetchedTree(self, account, client, tree_or_err, opts, backends.showNewsBlurNode, backends.showNewsBlurFeed)
     end)
 end
 
@@ -728,7 +749,7 @@ function backends.showCommaFeedAccount(self, account, opts)
             return
         end
 
-        showFetchedTree(self, account, client, tree_or_err, opts, backends.showCommaFeedNode)
+        showFetchedTree(self, account, client, tree_or_err, opts, backends.showCommaFeedNode, backends.showCommaFeedFeed)
     end)
 end
 
@@ -1185,6 +1206,10 @@ function backends.showFreshRSSAccount(self, account, opts)
         }
 
         backends.showFreshRSSNode(self, account, client, decorated_tree, { replace = opts.replace })
+        if opts.start_target then
+            openStartTarget(self, account, client, decorated_tree, opts.start_target,
+                backends.showFreshRSSNode, backends.showFreshRSSFeed)
+        end
     end
 
     if not opts.force_refresh and client.tree_cache then
@@ -1554,7 +1579,7 @@ function backends.showFeverAccount(self, account, opts)
             return
         end
 
-        showFetchedTree(self, account, client, tree_or_err, opts, backends.showFeverNode)
+        showFetchedTree(self, account, client, tree_or_err, opts, backends.showFeverNode, backends.showFeverFeed)
     end)
 end
 
@@ -1570,6 +1595,10 @@ function backends.showFeverNode(self, account, client, node, opts)
             table.insert(entries, {
                 text = child.title or _("Virtual feed"),
                 callback = normal_callback,
+                hold_callback = function()
+                    self:createLongPressMenuForNode(account, client, child, normal_callback)
+                end,
+                hold_keep_menu_open = true,
             })
         end
     end
@@ -1775,7 +1804,7 @@ function backends.showMinifluxAccount(self, account, opts)
             return
         end
 
-        showFetchedTree(self, account, client, tree_or_err, opts, backends.showMinifluxNode)
+        showFetchedTree(self, account, client, tree_or_err, opts, backends.showMinifluxNode, backends.showMinifluxFeed)
     end)
 end
 

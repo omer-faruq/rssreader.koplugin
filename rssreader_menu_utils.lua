@@ -201,6 +201,97 @@ function utils.findTreeFolder(tree, target)
     return nil
 end
 
+--------------------------------------------------------------------
+-- "Open on startup": a feed or folder the plugin opens directly.
+-- Stored as { account, kind, id, title }; kind is "feed"/"folder" for remote
+-- trees, "local_feed"/"local_group" for local accounts. id is what finds the
+-- node again: the tree node's id (nil for NewsBlur folders, matched by title
+-- then), a local feed's URL, a local group's title.
+--------------------------------------------------------------------
+
+local START_TARGET_SETTING = "rssreader_start_target"
+
+-- Each backend's root-level "All Unread" feed, offered as a preset in
+-- Settings (NewsBlur only has it with "Show NewsBlur 'All Feeds'" on).
+utils.ALL_UNREAD_FEED_IDS = {
+    newsblur = "__newsblur_all_unread__",
+    commafeed = "__commafeed_all_unread__",
+    freshrss = "freshrss_all",
+    fever = "fever_all_unread",
+    miniflux = "__miniflux_all_unread__",
+}
+
+function utils.getStartTarget()
+    local target = G_reader_settings:readSetting(START_TARGET_SETTING)
+    if type(target) == "table" and target.account and target.kind then
+        return target
+    end
+    return nil
+end
+
+function utils.setStartTarget(target)
+    G_reader_settings:saveSetting(START_TARGET_SETTING, target)
+    UIManager:show(InfoMessage:new{
+        text = string.format(_("RSS Reader will open '%s' on startup."), target.title or target.id or "?"),
+        timeout = 3,
+    })
+end
+
+function utils.clearStartTarget()
+    G_reader_settings:delSetting(START_TARGET_SETTING)
+end
+
+function utils.treeStartTarget(account, kind, node)
+    if not account or not account.name or not node then
+        return nil
+    end
+    return {
+        account = account.name,
+        kind = kind,
+        id = node.id ~= nil and tostring(node.id) or nil,
+        title = node.title,
+    }
+end
+
+function utils.sameStartTarget(a, b)
+    return a ~= nil and b ~= nil and a.account == b.account and a.kind == b.kind
+        and a.id == b.id and (a.id ~= nil or a.title == b.title)
+end
+
+local function nodeMatchesTarget(node, target)
+    if node.kind ~= target.kind then
+        return false
+    end
+    if target.id ~= nil then
+        return node.id ~= nil and tostring(node.id) == target.id
+    end
+    return node.id == nil and node.title == target.title
+end
+
+-- The nodes from just below root down to the target, or nil.
+function utils.findTreePath(tree, target)
+    for _i, child in ipairs(tree and tree.children or {}) do
+        if nodeMatchesTarget(child, target) then
+            return { child }
+        end
+        if child.kind == "folder" then
+            local sub_path = utils.findTreePath(child, target)
+            if sub_path then
+                table.insert(sub_path, 1, child)
+                return sub_path
+            end
+        end
+    end
+    return nil
+end
+
+function utils.showStartTargetMissing(target)
+    UIManager:show(InfoMessage:new{
+        text = string.format(_("Startup feed '%s' was not found."), target.title or target.id or "?"),
+        timeout = 3,
+    })
+end
+
 function utils.ensureMenuCloseHook(menu_instance)
     if not menu_instance or menu_instance._rss_close_wrapped then
         return

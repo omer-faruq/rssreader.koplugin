@@ -886,7 +886,15 @@ function RSSReader:openAccountList(opts)
         self:openAccountList({ skip_restore = true })
     end
 
-    if not opts.skip_restore then
+    -- "Open on startup": a fresh open goes to the picked feed/folder instead
+    -- of restoring the last position. Coming back from an article
+    -- (force_restore) still restores, that is where the user was reading.
+    local start_account, start_target
+    if not opts.skip_restore and not opts.force_restore then
+        start_account, start_target = self:getStartTarget()
+    end
+
+    if not opts.skip_restore and not start_account then
         -- Try to restore previous state first.
         -- force_restore ignores the freshness window: it is used when coming
         -- back from an article that was opened *from* this list, where reading
@@ -920,14 +928,33 @@ function RSSReader:openAccountList(opts)
     self:showMenu(menu_instance, function()
         self:openAccountList({ skip_restore = true })
     end, { reset_history = true })
+
+    -- Opened over the account list, so Back still walks up to it.
+    if start_account then
+        self:openAccount(start_account, { start_target = start_target })
+    end
 end
 
-function RSSReader:openAccount(account)
+-- Settings > Open on startup: the target and its account, if that still exists.
+function RSSReader:getStartTarget()
+    local target = require("rssreader_menu_utils").getStartTarget()
+    if not target then
+        return nil
+    end
+    for _i, account in ipairs(self.accounts:getAccounts() or {}) do
+        if account.name == target.account then
+            return account, target
+        end
+    end
+    return nil
+end
+
+function RSSReader:openAccount(account, opts)
     if not account then
         return
     end
     local builder = MenuBuilder:new{ accounts = self.accounts, reader = self }
-    builder:openAccount(self, account)
+    builder:openAccount(self, account, opts)
 end
 
 function RSSReader:addLinkDialogButtons()

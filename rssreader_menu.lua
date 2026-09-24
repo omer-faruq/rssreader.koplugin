@@ -514,6 +514,22 @@ function MenuBuilder:collectFeedIdsForNode(node)
     return feed_ids
 end
 
+-- The "Open on startup" row of the long-press dialogs; nil (no row) when the
+-- item has nothing to be found again by.
+function MenuBuilder:startTargetRow(get_dialog, target)
+    if not target then
+        return nil
+    end
+    return {{
+        text = _("Open on startup"),
+        background = Blitbuffer.COLOR_WHITE,
+        callback = function()
+            UIManager:close(get_dialog())
+            utils.setStartTarget(target)
+        end,
+    }}
+end
+
 function MenuBuilder:createLongPressMenuForNode(account, client, node, normal_callback)
     if not node or node.kind ~= "feed" then
         return
@@ -553,7 +569,7 @@ function MenuBuilder:createLongPressMenuForNode(account, client, node, normal_ca
                     UIManager:close(dialog)
                 end,
             },
-        }},
+        }, self:startTargetRow(function() return dialog end, utils.treeStartTarget(account, "feed", node))},
     }
 
     UIManager:show(dialog)
@@ -599,7 +615,7 @@ function MenuBuilder:createLongPressMenuForFolder(account, client, node, normal_
                     UIManager:close(dialog)
                 end,
             },
-        }},
+        }, self:startTargetRow(function() return dialog end, utils.treeStartTarget(account, "folder", node))},
     }
 
     UIManager:show(dialog)
@@ -640,7 +656,9 @@ function MenuBuilder:createLongPressMenuForLocalGroup(group, account_name, norma
                     UIManager:close(dialog)
                 end,
             },
-        }},
+        }, self:startTargetRow(function() return dialog end, account_name and group.title and {
+            account = account_name, kind = "local_group", id = group.title, title = group.title,
+        })},
     }
 
     UIManager:show(dialog)
@@ -930,7 +948,9 @@ function MenuBuilder:createLongPressMenuForLocalFeed(feed, account_name, normal_
                     UIManager:close(dialog)
                 end,
             },
-        }},
+        }, self:startTargetRow(function() return dialog end, account_name and feed.url and {
+            account = account_name, kind = "local_feed", id = feed.url, title = feed.title or feed.url,
+        })},
     }
 
     UIManager:show(dialog)
@@ -1837,6 +1857,15 @@ function MenuBuilder:showSettingsPopup()
                 end,
             }},
             {{
+                text = _("Open on startup"),
+                background = Blitbuffer.COLOR_WHITE,
+                align = "left",
+                callback = function()
+                    UIManager:close(dialog)
+                    self:showStartViewPopup()
+                end,
+            }},
+            {{
                 text = _("Link popup"),
                 background = Blitbuffer.COLOR_WHITE,
                 align = "left",
@@ -2037,6 +2066,59 @@ function MenuBuilder:showListViewPopup()
     UIManager:show(dialog)
 end
 
+-- Settings > Open on startup. A long-press on any feed or folder can pick one
+-- ("Custom"); the per-account All Unread entries are presets of the same thing.
+function MenuBuilder:showStartViewPopup()
+    local current = utils.getStartTarget()
+    local show_newsblur_all = G_reader_settings:nilOrTrue("rssreader_newsblur_show_all_feeds")
+
+    local function label(is_current, display)
+        return is_current and ("✓ " .. display) or display
+    end
+
+    local dialog
+    local function choice(text, is_current, on_pick)
+        return {{
+            text = label(is_current, text),
+            background = Blitbuffer.COLOR_WHITE,
+            align = "left",
+            callback = function()
+                UIManager:close(dialog)
+                on_pick()
+            end,
+        }}
+    end
+
+    local buttons = {
+        choice(_("Account list"), current == nil, utils.clearStartTarget),
+    }
+    local current_is_preset = false
+    local accounts = self.accounts and self.accounts:getAccounts() or {}
+    for _i, account in ipairs(accounts) do
+        local feed_id = utils.ALL_UNREAD_FEED_IDS[account.type]
+        if account.name and feed_id and (account.type ~= "newsblur" or show_newsblur_all) then
+            local preset = { account = account.name, kind = "feed", id = feed_id, title = "★ All Unread" }
+            local is_current = utils.sameStartTarget(current, preset)
+            current_is_preset = current_is_preset or is_current
+            table.insert(buttons, choice(
+                string.format(_("%s: All Unread"), Commons.accountTitle(account)),
+                is_current,
+                function() utils.setStartTarget(preset) end))
+        end
+    end
+    if current and not current_is_preset then
+        table.insert(buttons, choice(
+            string.format(_("Custom: %s › %s"), current.account, current.title or current.id or "?"),
+            true, function() end))
+    end
+
+    dialog = ButtonDialog:new{
+        title = _("Open on startup") .. "\n" .. _("Long-press a feed or folder to pick your own."),
+        buttons = buttons,
+    }
+    UIManager:show(dialog)
+end
+
 function MenuBuilder:showLinkPopupSettings()
     local show_open = G_reader_settings:nilOrTrue("rssreader_link_popup_show_open_sanitized")
     local show_save = G_reader_settings:nilOrTrue("rssreader_link_popup_show_save_sanitized")
@@ -2191,25 +2273,27 @@ function MenuBuilder:clearCacheDirectory()
     })
 end
 
-function MenuBuilder:openAccount(reader, account)
+-- opts.start_target: the "Open on startup" setting, see showStartViewPopup.
+function MenuBuilder:openAccount(reader, account, opts)
+    local start_target = opts and opts.start_target
     local account_type = account and account.type
     if account_type == "local" then
-        self:showLocalAccount(account)
+        self:showLocalAccount(account, start_target)
         return
     elseif account_type == "newsblur" then
-        backends.showNewsBlurAccount(self, account, { force_refresh = true })
+        backends.showNewsBlurAccount(self, account, { force_refresh = true, start_target = start_target })
         return
     elseif account_type == "commafeed" then
-        backends.showCommaFeedAccount(self, account, { force_refresh = true })
+        backends.showCommaFeedAccount(self, account, { force_refresh = true, start_target = start_target })
         return
     elseif account_type == "freshrss" then
-        backends.showFreshRSSAccount(self, account, { force_refresh = true })
+        backends.showFreshRSSAccount(self, account, { force_refresh = true, start_target = start_target })
         return
     elseif account_type == "fever" then
-        backends.showFeverAccount(self, account, { force_refresh = true })
+        backends.showFeverAccount(self, account, { force_refresh = true, start_target = start_target })
         return
     elseif account_type == "miniflux" then
-        backends.showMinifluxAccount(self, account, { force_refresh = true })
+        backends.showMinifluxAccount(self, account, { force_refresh = true, start_target = start_target })
         return
     end
 
@@ -2218,7 +2302,7 @@ function MenuBuilder:openAccount(reader, account)
     })
 end
 
-function MenuBuilder:showLocalAccount(account)
+function MenuBuilder:showLocalAccount(account, start_target)
     local groups = {}
     local feeds = {}
     local account_name = (account and account.name) or "local"
@@ -2275,6 +2359,38 @@ function MenuBuilder:showLocalAccount(account)
     self:showMenu(menu_instance, function()
         self:showLocalAccount(account)
     end)
+
+    if start_target then
+        self:openLocalStartTarget(account_name, groups, feeds, start_target)
+    end
+end
+
+-- Local counterpart of the backends' openStartTarget: a top-level feed, a
+-- group, or a feed inside a group (opening the group first, for Back).
+function MenuBuilder:openLocalStartTarget(account_name, groups, feeds, target)
+    local function isTargetFeed(feed)
+        return target.kind == "local_feed" and feed.url == target.id
+    end
+    for _i, feed in ipairs(feeds or {}) do
+        if isTargetFeed(feed) then
+            self:showLocalFeed(feed, { account_name = account_name })
+            return
+        end
+    end
+    for _i, group in ipairs(groups or {}) do
+        if target.kind == "local_group" and group.title == target.id then
+            self:showLocalGroup(group, account_name)
+            return
+        end
+        for _j, feed in ipairs(group.feeds or {}) do
+            if isTargetFeed(feed) then
+                self:showLocalGroup(group, account_name)
+                self:showLocalFeed(feed, { account_name = account_name })
+                return
+            end
+        end
+    end
+    utils.showStartTargetMissing(target)
 end
 
 function MenuBuilder:showLocalGroup(group, account_name)
