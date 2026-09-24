@@ -16,6 +16,26 @@ local utils = require("rssreader_menu_utils")
 
 local backends = {}
 
+-- After a refresh (opts.focus/opts.replace from a tree menu's refresh icon),
+-- show the folder the user was in, found again in the new tree, in place of
+-- the old menu. Falls back to the root if that folder is gone.
+local function showFetchedTree(self, account, client, tree, opts, show_node)
+    local target = utils.findTreeFolder(tree, opts.focus) or tree
+    show_node(self, account, client, target, { replace = opts.replace })
+end
+
+-- Back into a tree menu: resolve the node in the latest tree, so a refresh
+-- further down also updates the unread counts of the levels above it.
+local function reopenTreeNode(self, account, client, node, show_account, show_node)
+    if node and node.kind == "folder" then
+        show_node(self, account, client, utils.findTreeFolder(client.tree_cache, node) or node)
+    elseif client.tree_cache then
+        show_account(self, account)
+    else
+        show_node(self, account, client, node)
+    end
+end
+
 function backends.collectFeedsForCommaFeedVirtual(self, client, virtual_node)
     local feed_ids = {}
     if not virtual_node or not virtual_node._virtual then
@@ -395,11 +415,11 @@ function backends.showNewsBlurAccount(self, account, opts)
             return
         end
 
-        backends.showNewsBlurNode(self, account, client, tree_or_err)
+        showFetchedTree(self, account, client, tree_or_err, opts, backends.showNewsBlurNode)
     end)
 end
 
-function backends.showNewsBlurNode(self, account, client, node)
+function backends.showNewsBlurNode(self, account, client, node, opts)
     local children = node and node.children or {}
     local entries = {}
     for _, child in ipairs(children) do
@@ -450,14 +470,16 @@ function backends.showNewsBlurNode(self, account, client, node)
         return
     end
 
-    local menu_instance = Menu:new{
+    local menu_instance = utils.newRefreshableMenu({
         title = node and node.title or (account and account.name) or _("NewsBlur"),
         item_table = entries,
         onMenuHold = utils.triggerHoldCallback,
-    }
-    self:showMenu(menu_instance, function()
-        backends.showNewsBlurNode(self, account, client, node)
+    }, function(this)
+        backends.showNewsBlurAccount(self, account, { force_refresh = true, focus = node, replace = this })
     end)
+    self:showMenu(menu_instance, function()
+        reopenTreeNode(self, account, client, node, backends.showNewsBlurAccount, backends.showNewsBlurNode)
+    end, { replace = opts and opts.replace })
 
     if menu_instance then
         menu_instance.onMenuHold = utils.triggerHoldCallback
@@ -555,12 +577,16 @@ function backends.showNewsBlurFeed(self, account, client, feed_node, opts)
             end
             menu_instance.onMenuHold = utils.triggerHoldCallback
         else
-            menu_instance = Menu:new{
+            menu_instance = utils.newRefreshableMenu({
                 title = feed_node.title or (account and account.name) or _("NewsBlur"),
                 item_table = entries,
                 multilines_forced = true,
                 items_max_lines = view_mode == "magazine" and 5 or nil,
-            }
+            }, function()
+                -- Not reusing the cache fetches page 1 again; the current
+                -- menu is updated in place since it shows this feed_node.
+                backends.showNewsBlurFeed(self, account, client, feed_node, { menu_page = 1 })
+            end)
             menu_instance._rss_feed_node = feed_node
             menu_instance.onMenuHold = utils.triggerHoldCallback
             utils.ensureMenuCloseHook(menu_instance)
@@ -702,11 +728,11 @@ function backends.showCommaFeedAccount(self, account, opts)
             return
         end
 
-        backends.showCommaFeedNode(self, account, client, tree_or_err)
+        showFetchedTree(self, account, client, tree_or_err, opts, backends.showCommaFeedNode)
     end)
 end
 
-function backends.showCommaFeedNode(self, account, client, node)
+function backends.showCommaFeedNode(self, account, client, node, opts)
     local children = node and node.children or {}
     local entries = {}
     for _child_index, child in ipairs(children) do
@@ -793,14 +819,16 @@ function backends.showCommaFeedNode(self, account, client, node)
         return
     end
 
-    local menu_instance = Menu:new{
+    local menu_instance = utils.newRefreshableMenu({
         title = node and node.title or (account and account.name) or _("CommaFeed"),
         item_table = entries,
         onMenuHold = utils.triggerHoldCallback,
-    }
-    self:showMenu(menu_instance, function()
-        backends.showCommaFeedNode(self, account, client, node)
+    }, function(this)
+        backends.showCommaFeedAccount(self, account, { force_refresh = true, focus = node, replace = this })
     end)
+    self:showMenu(menu_instance, function()
+        reopenTreeNode(self, account, client, node, backends.showCommaFeedAccount, backends.showCommaFeedNode)
+    end, { replace = opts and opts.replace })
 
     if menu_instance then
         menu_instance.onMenuHold = utils.triggerHoldCallback
@@ -845,13 +873,15 @@ function backends.showCommaFeedTagsRoot(self, account, client, node, opts)
             return
         end
 
-        local menu_instance = Menu:new{
+        local menu_instance = utils.newRefreshableMenu({
             title = node and node.title or _("Tags"),
             item_table = entries,
-        }
+        }, function(this)
+            backends.showCommaFeedTagsRoot(self, account, client, node, { force_refresh = true, replace = this })
+        end)
         self:showMenu(menu_instance, function()
             backends.showCommaFeedTagsRoot(self, account, client, node)
-        end)
+        end, { replace = opts.replace })
     end)
 end
 
@@ -945,12 +975,16 @@ function backends.showCommaFeedFeed(self, account, client, feed_node, opts)
             end
             menu_instance.onMenuHold = utils.triggerHoldCallback
         else
-            menu_instance = Menu:new{
+            menu_instance = utils.newRefreshableMenu({
                 title = feed_node.title or (account and account.name) or _("CommaFeed"),
                 item_table = entries,
                 multilines_forced = true,
                 items_max_lines = view_mode == "magazine" and 5 or nil,
-            }
+            }, function()
+                -- Not reusing the cache fetches page 1 again; the current
+                -- menu is updated in place since it shows this feed_node.
+                backends.showCommaFeedFeed(self, account, client, feed_node, { menu_page = 1 })
+            end)
             menu_instance._rss_feed_node = feed_node
             menu_instance.onMenuHold = utils.triggerHoldCallback
             utils.ensureMenuCloseHook(menu_instance)
@@ -1150,7 +1184,7 @@ function backends.showFreshRSSAccount(self, account, opts)
             feeds = tree and tree.feeds or nil,
         }
 
-        backends.showFreshRSSNode(self, account, client, decorated_tree)
+        backends.showFreshRSSNode(self, account, client, decorated_tree, { replace = opts.replace })
     end
 
     if not opts.force_refresh and client.tree_cache then
@@ -1167,11 +1201,17 @@ function backends.showFreshRSSAccount(self, account, opts)
             return
         end
 
-        showWithTree(tree_or_err)
+        -- The special feeds only decorate the root; a folder is shown as is.
+        local folder = utils.findTreeFolder(tree_or_err, opts.focus)
+        if folder then
+            backends.showFreshRSSNode(self, account, client, folder, { replace = opts.replace })
+        else
+            showWithTree(tree_or_err)
+        end
     end)
 end
 
-function backends.showFreshRSSNode(self, account, client, node)
+function backends.showFreshRSSNode(self, account, client, node, opts)
     local children = node and node.children or {}
     local entries = {}
     for _, child in ipairs(children) do
@@ -1214,14 +1254,16 @@ function backends.showFreshRSSNode(self, account, client, node)
         return
     end
 
-    local menu_instance = Menu:new{
+    local menu_instance = utils.newRefreshableMenu({
         title = node and node.title or (account and account.name) or _("FreshRSS"),
         item_table = entries,
         onMenuHold = utils.triggerHoldCallback,
-    }
-    self:showMenu(menu_instance, function()
-        backends.showFreshRSSNode(self, account, client, node)
+    }, function(this)
+        backends.showFreshRSSAccount(self, account, { force_refresh = true, focus = node, replace = this })
     end)
+    self:showMenu(menu_instance, function()
+        reopenTreeNode(self, account, client, node, backends.showFreshRSSAccount, backends.showFreshRSSNode)
+    end, { replace = opts and opts.replace })
 
     if menu_instance then
         menu_instance.onMenuHold = utils.triggerHoldCallback
@@ -1344,12 +1386,16 @@ function backends.showFreshRSSFeed(self, account, client, feed_node, opts)
             end
             menu_instance.onMenuHold = utils.triggerHoldCallback
         else
-            menu_instance = Menu:new{
+            menu_instance = utils.newRefreshableMenu({
                 title = feed_node.title or (account and account.name) or _("FreshRSS"),
                 item_table = entries,
                 multilines_forced = true,
                 items_max_lines = view_mode == "magazine" and 5 or nil,
-            }
+            }, function()
+                -- Not reusing the cache fetches page 1 again; the current
+                -- menu is updated in place since it shows this feed_node.
+                backends.showFreshRSSFeed(self, account, client, feed_node, { menu_page = 1 })
+            end)
             menu_instance._rss_feed_node = feed_node
             menu_instance.onMenuHold = utils.triggerHoldCallback
             utils.ensureMenuCloseHook(menu_instance)
@@ -1508,11 +1554,11 @@ function backends.showFeverAccount(self, account, opts)
             return
         end
 
-        backends.showFeverNode(self, account, client, tree_or_err)
+        showFetchedTree(self, account, client, tree_or_err, opts, backends.showFeverNode)
     end)
 end
 
-function backends.showFeverNode(self, account, client, node)
+function backends.showFeverNode(self, account, client, node, opts)
     local children = node and node.children or {}
     local entries = {}
     
@@ -1535,14 +1581,16 @@ function backends.showFeverNode(self, account, client, node)
         return
     end
 
-    local menu_instance = Menu:new{
+    local menu_instance = utils.newRefreshableMenu({
         title = node and node.title or (account and account.name) or _("Fever API"),
         item_table = entries,
         onMenuHold = utils.triggerHoldCallback,
-    }
-    self:showMenu(menu_instance, function()
-        backends.showFeverNode(self, account, client, node)
+    }, function(this)
+        backends.showFeverAccount(self, account, { force_refresh = true, focus = node, replace = this })
     end)
+    self:showMenu(menu_instance, function()
+        reopenTreeNode(self, account, client, node, backends.showFeverAccount, backends.showFeverNode)
+    end, { replace = opts and opts.replace })
 
     if menu_instance then
         menu_instance.onMenuHold = utils.triggerHoldCallback
@@ -1632,12 +1680,16 @@ function backends.showFeverFeed(self, account, client, feed_node, opts)
             end
             menu_instance.onMenuHold = utils.triggerHoldCallback
         else
-            menu_instance = Menu:new{
+            menu_instance = utils.newRefreshableMenu({
                 title = feed_node.title or (account and account.name) or _("Fever API"),
                 item_table = entries,
                 multilines_forced = true,
                 items_max_lines = view_mode == "magazine" and 5 or nil,
-            }
+            }, function()
+                -- Not reusing the cache fetches page 1 again; the current
+                -- menu is updated in place since it shows this feed_node.
+                backends.showFeverFeed(self, account, client, feed_node, { menu_page = 1 })
+            end)
             menu_instance._rss_feed_node = feed_node
             menu_instance.onMenuHold = utils.triggerHoldCallback
             utils.ensureMenuCloseHook(menu_instance)
@@ -1723,11 +1775,11 @@ function backends.showMinifluxAccount(self, account, opts)
             return
         end
 
-        backends.showMinifluxNode(self, account, client, tree_or_err)
+        showFetchedTree(self, account, client, tree_or_err, opts, backends.showMinifluxNode)
     end)
 end
 
-function backends.showMinifluxNode(self, account, client, node)
+function backends.showMinifluxNode(self, account, client, node, opts)
     local children = node and node.children or {}
     local entries = {}
     for _, child in ipairs(children) do
@@ -1773,14 +1825,16 @@ function backends.showMinifluxNode(self, account, client, node)
         return
     end
 
-    local menu_instance = Menu:new{
+    local menu_instance = utils.newRefreshableMenu({
         title = node and node.title or (account and account.name) or _("Miniflux"),
         item_table = entries,
         onMenuHold = utils.triggerHoldCallback,
-    }
-    self:showMenu(menu_instance, function()
-        backends.showMinifluxNode(self, account, client, node)
+    }, function(this)
+        backends.showMinifluxAccount(self, account, { force_refresh = true, focus = node, replace = this })
     end)
+    self:showMenu(menu_instance, function()
+        reopenTreeNode(self, account, client, node, backends.showMinifluxAccount, backends.showMinifluxNode)
+    end, { replace = opts and opts.replace })
 
     if menu_instance then
         menu_instance.onMenuHold = utils.triggerHoldCallback
@@ -1877,12 +1931,16 @@ function backends.showMinifluxFeed(self, account, client, feed_node, opts)
             end
             menu_instance.onMenuHold = utils.triggerHoldCallback
         else
-            menu_instance = Menu:new{
+            menu_instance = utils.newRefreshableMenu({
                 title = feed_node.title or (account and account.name) or _("Miniflux"),
                 item_table = entries,
                 multilines_forced = true,
                 items_max_lines = view_mode == "magazine" and 5 or nil,
-            }
+            }, function()
+                -- Not reusing the cache fetches page 1 again; the current
+                -- menu is updated in place since it shows this feed_node.
+                backends.showMinifluxFeed(self, account, client, feed_node, { menu_page = 1 })
+            end)
             menu_instance._rss_feed_node = feed_node
             menu_instance.onMenuHold = utils.triggerHoldCallback
             utils.ensureMenuCloseHook(menu_instance)

@@ -166,6 +166,41 @@ function utils.findNextIndex(stories, start_index, predicate)
     return nil
 end
 
+-- A Menu with a refresh icon in the title bar's left corner. The icon has to be
+-- set at construction time; Menu also maps the hardware Menu key to it, which
+-- is how key-only devices reach it.
+function utils.newRefreshableMenu(menu_opts, on_refresh)
+    local Menu = require("ui/widget/menu")
+    menu_opts.title_bar_left_icon = "cre.render.reload"
+    local menu_instance = Menu:new(menu_opts)
+    menu_instance.onLeftButtonTap = function(this)
+        on_refresh(this)
+        return true
+    end
+    return menu_instance
+end
+
+-- Find target's counterpart in a (freshly built) tree: folders match by id, or
+-- by title where the backend gives them none (NewsBlur).
+function utils.findTreeFolder(tree, target)
+    if not tree or not target or target.kind ~= "folder" then
+        return nil
+    end
+    for _, child in ipairs(tree.children or {}) do
+        if child.kind == "folder" then
+            if (target.id ~= nil and child.id == target.id)
+                    or (target.id == nil and child.id == nil and child.title == target.title) then
+                return child
+            end
+            local found = utils.findTreeFolder(child, target)
+            if found then
+                return found
+            end
+        end
+    end
+    return nil
+end
+
 function utils.ensureMenuCloseHook(menu_instance)
     if not menu_instance or menu_instance._rss_close_wrapped then
         return

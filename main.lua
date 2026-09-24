@@ -805,7 +805,14 @@ function RSSReader:showMenu(menu_instance, reopen_func, opts)
         table.insert(self.history, self.root_reopen)
     end
 
-    if opts.reset_history then
+    -- opts.replace: the menu a refresh was started from. Take its place without
+    -- touching history -- but only if it is still the current one, the fetch
+    -- may have waited for Wi-Fi while the user moved on.
+    local replaced = opts.replace and self.current_menu_info
+        and self.current_menu_info.menu == opts.replace and opts.replace
+    if replaced then
+        menu_instance._rss_is_root_menu = replaced._rss_is_root_menu or false
+    elseif opts.reset_history then
         self.history = {}
         menu_instance._rss_is_root_menu = true
     elseif self.current_menu_info and self.current_menu_info.reopen then

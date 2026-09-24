@@ -1636,12 +1636,20 @@ function MenuBuilder:showLocalFeed(feed, opts)
             end
             menu_instance.onMenuHold = utils.triggerHoldCallback
         else
-            menu_instance = Menu:new{
+            menu_instance = utils.newRefreshableMenu({
                 title = feed_node.title or _("Feed"),
                 item_table = entries,
                 multilines_forced = true,
                 items_max_lines = view_mode == "magazine" and 5 or nil,
-            }
+            }, function()
+                -- Not reusing the cache fetches page 1 again; the current
+                -- menu is updated in place since it shows this feed_node.
+                self:showLocalFeed(feed, {
+                    account_name = account_name,
+                    menu_page = 1,
+                    refresh = true,
+                })
+            end)
             menu_instance._rss_feed_node = feed_node
             menu_instance.onMenuHold = utils.triggerHoldCallback
             utils.ensureMenuCloseHook(menu_instance)
@@ -1682,7 +1690,8 @@ function MenuBuilder:showLocalFeed(feed, opts)
             UIManager:show(InfoMessage:new{
                 text = string.format(_("Failed to load feed: %s"), items_or_err or _("unknown")),
             })
-            if self.reader and type(self.reader.goBack) == "function" then
+            -- A failed refresh keeps the list that is already on screen.
+            if not opts.refresh and self.reader and type(self.reader.goBack) == "function" then
                 self.reader:goBack()
             end
             return
