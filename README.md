@@ -51,6 +51,21 @@ The other Lua files handle internal logic. End users do not need to open or modi
 - In the feed list, a tap performs the action you configured (see "Tap Action on Feed Items" below), while a long press always shows all options: preview, open directly, save, and toggle read/unread.
 - For local accounts, the groups and feeds defined in your renamed `rssreader_local_defaults.lua` appear. Editing the URLs here is how you add new sources.
 
+## Refreshing
+Feed trees and story lists have a refresh icon in the top left corner of the title bar; on devices with a hardware **Menu** key, that key does the same. There is no need to close and reopen the plugin to pull new articles:
+- **In a feed tree** (account root or any folder) – The whole tree is fetched again, with fresh unread counts, and you stay in the same folder. Going Back afterwards shows the fresh counts on the levels above too
+- **In a story list** – The first page of stories is fetched again and the list jumps back to its first page. For a local feed, a failed refresh keeps the list that is already on screen
+- A refresh does not add a navigation step: Back still goes up one level
+- Local account and group menus and the reading list have no refresh icon, since they list only what is in your configuration. Opening a local feed always fetches it fresh
+
+## Open on Startup
+By default RSS Reader opens on the account list. You can make it open directly on a feed or folder instead:
+- **Long-press** any feed or folder (remote trees, local feeds and local groups) → **Open on startup**
+- Or pick a preset under **RSS Reader** → **Settings** → **Open on startup**: the account list, or the **★ All Unread** view of any remote account (for NewsBlur, only while **Show NewsBlur 'All Feeds'** is on). A feed or folder picked by long-press shows up there as **Custom**
+- On startup, every folder on the way to it is opened too, so Back climbs up through them to the account list as if you had navigated there yourself
+- If the feed or folder no longer exists, the account's tree opens with a short notice
+- Coming back from an opened article still returns you to the list you were reading from, not to the startup feed
+
 ## Virtual "All Feeds" Aggregated Views
 NewsBlur, CommaFeed, Miniflux, and Fever API accounts include special virtual feeds that aggregate stories from all your subscriptions:
 - **★ All Feeds** – View all stories from all subscribed feeds in a single chronological list
@@ -72,7 +87,8 @@ NewsBlur, CommaFeed, Miniflux, and Fever API accounts include special virtual fe
 
 ### Mark All as Read for Virtual Feeds
 - **CommaFeed & Miniflux**: Virtual feeds support "Mark all as read" functionality. Long-press a virtual feed to mark all stories in that view as read.
-- **NewsBlur & Fever API**: Virtual feeds cannot be marked as read in bulk. Use individual feeds for "Mark all as read" functionality.
+- **Fever API**: Long-press a virtual feed → **Mark all as read**. After a confirmation, every subscribed feed is marked as read one by one, so this can take a while with many subscriptions.
+- **NewsBlur**: Virtual feeds cannot be marked as read in bulk. Use individual feeds for "Mark all as read" functionality.
 
 ## Starring Articles (CommaFeed, FreshRSS)
 CommaFeed and FreshRSS accounts support starring/unstarring individual articles, synced through their APIs (FreshRSS calls them favourites and keeps them as the `user/-/state/com.google/starred` tag):
@@ -135,6 +151,13 @@ Configure what happens when you tap a story in the feed list:
   - **Add to list** – Adds the story to the reading list
 - The setting applies to all account types (local, NewsBlur, CommaFeed, FreshRSS) and the reading list
 
+## Moving Between Articles in the Preview
+The story preview's toolbar has **Previous**, **Next** and **Next unread** buttons. On devices with page turn keys, the keys also carry on past the article's edges:
+- On the **last page**, the next-page key opens the next article; on the **first page**, the previous-page key opens the previous one. Inside the article the keys turn pages as usual
+- Configure it under **RSS Reader** → **Settings** → **Page keys at article edges**: **Next / previous article** (default), **Next / previous unread article**, or **Do nothing**
+- The next article opens over the current one, with a *Loading article…* message while it is prepared, so the list is not flashed in between
+- Opening an article marks it read, as tapping it in the list does
+
 ## Returning to RSS from an Opened Article
 
 When you open a story, it is downloaded to the RSS Reader cache and handed to KOReader, which opens it as a normal document. From there the RSS menus are gone, so the plugin adds several ways back to the feed list you came from. All of them are optional and configured under **RSS Reader** → **Settings** → **Return to RSS from an article**:
@@ -142,11 +165,11 @@ When you open a story, it is downloaded to the RSS Reader cache and handed to KO
 - **Show floating button** – A small `RSS` button drawn in a corner of every page. On by default on touchscreens, off by default on key-only devices (where there is nothing to tap)
 - **Corner tap returns to the list** – Makes that corner tappable. Works with the button hidden too, if you prefer no permanent overlay on an e-ink screen
 - **Corner** – Which corner the button and its tap area live in: bottom right (default), bottom left, top right, top left. Bottom right is the default because it is the least contested spot: the top strip doubles as KOReader's menu tap zone, the top right corner is where the bookmark dogear is drawn and where the Gestures plugin puts *toggle bookmark*, while the bottom right corner ships with no action of its own. In a bottom corner the button sits just above the status bar rather than on top of it
-- **Ask at end of article** – Replaces KOReader's end-of-document dialog with one offering **Back to RSS list**, **Go to beginning** and **File browser**
+- **Ask at end of article** – Replaces KOReader's end-of-document dialog with one offering **Back to RSS list**, **Next**, **Next unread**, **Go to beginning** and **File browser**. **Next** and **Next unread** open the following story of the list the article came from, the same way the list would (marked read, opened as a document). They are greyed out for articles opened from the reading list
 - **Back key returns to the list** – On devices with a Back key, pressing it in an article returns to the feed list instead of prompting to exit KOReader. It only steps in when there is nothing left to go back to inside the article itself, so following links and jumping around keeps working normally
 - **Enabled** – Master switch for all of the above
 
-Returning opens the feed list *on top of* the article, so closing the list drops you straight back into what you were reading, at the same position. Tapping another story opens it as usual.
+Returning opens the feed list *on top of* the article. Tapping another story opens it as usual. Leaving RSS Reader from there (**Back** on the top level, or closing the list) closes the article too and opens the file browser at your home folder, rather than dropping you back into an article whose only way out is the list again. KOReader remembers your position, so opening the article again from the list resumes where you left off.
 
 Two things this deliberately does not cover:
 
@@ -162,7 +185,8 @@ On devices with physical keys only (Kindle 3/4, key-based Kobo/PocketBook models
 - **Up / Down** – Move the selection through the list; the selection wraps around onto the **Back** button below the last item
 - **Press** (5-way center) – Open the selected entry, or activate the focused **Back** button
 - **Long-press equivalent** (context menu of the selected entry) – `ScreenKB` + `Press` on Kindle 4, `Shift` + `Press` on keyboard devices, or the `Right` key on few-key devices
-- **Page turn buttons** – Previous / next page in lists, scroll up / down in the story preview
+- **Page turn buttons** – Previous / next page in lists, scroll up / down in the story preview; past the preview's first / last page they move to the previous / next article (see [Moving Between Articles in the Preview](#moving-between-articles-in-the-preview))
+- **Menu** – Refreshes the feed tree or story list on screen (see [Refreshing](#refreshing))
 - **Back** – Go up one level (feed → category → account list); on the top level it closes RSS Reader. It also closes the story preview
 - **Back inside an opened article** – Returns to the feed list you came from instead of prompting to exit KOReader (see [Returning to RSS from an Opened Article](#returning-to-rss-from-an-opened-article)). On Kindle 4 you can additionally bind the **RSS Reader** action to a `ScreenKB` + key combination with the Hotkeys plugin
 
