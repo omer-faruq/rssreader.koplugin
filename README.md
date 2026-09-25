@@ -52,10 +52,11 @@ The other Lua files handle internal logic. End users do not need to open or modi
 - For local accounts, the groups and feeds defined in your renamed `rssreader_local_defaults.lua` appear. Editing the URLs here is how you add new sources.
 
 ## Refreshing
-Feed trees and story lists have a refresh icon in the top left corner of the title bar; on devices with a hardware **Menu** key, that key does the same. There is no need to close and reopen the plugin to pull new articles:
+Feed trees and story lists have a menu icon in the top left corner of the title bar with **Refresh** and **Mark all as read**; on devices with a hardware **Menu** key, that key opens it too. Where mark-all is not available (NewsBlur virtual feeds, CommaFeed tags, FreshRSS *Today (Unread)*) the icon is a plain refresh button. There is no need to close and reopen the plugin to pull new articles:
 - **In a feed tree** (account root or any folder) – The whole tree is fetched again, with fresh unread counts, and you stay in the same folder. Going Back afterwards shows the fresh counts on the levels above too
 - **In a story list** – The first page of stories is fetched again and the list jumps back to its first page. For a local feed, a failed refresh keeps the list that is already on screen
 - A refresh does not add a navigation step: Back still goes up one level
+- **Mark all as read** marks the tree or folder (after a confirmation) or the feed on screen read, like the long-press action, then shows the updated unread counts or un-bolds the list
 - Local account and group menus and the reading list have no refresh icon, since they list only what is in your configuration. Opening a local feed always fetches it fresh
 
 ## Open on Startup
@@ -186,7 +187,7 @@ On devices with physical keys only (Kindle 3/4, key-based Kobo/PocketBook models
 - **Press** (5-way center) – Open the selected entry, or activate the focused **Back** button
 - **Long-press equivalent** (context menu of the selected entry) – `ScreenKB` + `Press` on Kindle 4, `Shift` + `Press` on keyboard devices, or the `Right` key on few-key devices
 - **Page turn buttons** – Previous / next page in lists, scroll up / down in the story preview; past the preview's first / last page they move to the previous / next article (see [Moving Between Articles in the Preview](#moving-between-articles-in-the-preview))
-- **Menu** – Refreshes the feed tree or story list on screen (see [Refreshing](#refreshing))
+- **Menu** – Opens the Refresh / Mark all as read menu of the feed tree or story list on screen (see [Refreshing](#refreshing))
 - **Back** – Go up one level (feed → category → account list); on the top level it closes RSS Reader. It also closes the story preview
 - **Back inside an opened article** – Returns to the feed list you came from instead of prompting to exit KOReader (see [Returning to RSS from an Opened Article](#returning-to-rss-from-an-opened-article)). On Kindle 4 you can additionally bind the **RSS Reader** action to a `ScreenKB` + key combination with the Hotkeys plugin
 
@@ -247,6 +248,7 @@ Note that Diffbot, Instaparser and the RapidAPI variant all send the URL of ever
 ### Mark All as Read
 - **Long-press any feed title** to open the contextual menu.
 - Choose **Mark all as read** to update the read state for every story in that feed.
+- Inside a feed tree, folder or story list, the title bar menu (top left) offers the same for what is on screen.
 
 ## OPML Import/Export
 The plugin supports importing and exporting feeds in OPML format, making it easy to migrate feeds from other RSS readers or backup your current subscriptions.

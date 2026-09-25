@@ -185,13 +185,69 @@ end
 
 -- A Menu with a refresh icon in the title bar's left corner. The icon has to be
 -- set at construction time; Menu also maps the hardware Menu key to it, which
--- is how key-only devices reach it.
-function utils.newRefreshableMenu(menu_opts, on_refresh)
+-- is how key-only devices reach it. With on_mark_all_read the icon opens a
+-- small menu offering both instead.
+function utils.newRefreshableMenu(menu_opts, on_refresh, on_mark_all_read)
     local Menu = require("ui/widget/menu")
-    menu_opts.title_bar_left_icon = "cre.render.reload"
+    menu_opts.title_bar_left_icon = on_mark_all_read and "appbar.menu" or "cre.render.reload"
     local menu_instance = Menu:new(menu_opts)
     menu_instance.onLeftButtonTap = function(this)
-        on_refresh(this)
+        if not on_mark_all_read then
+            on_refresh(this)
+            return true
+        end
+        local ButtonDialog = require("ui/widget/buttondialog")
+        local dialog
+        dialog = ButtonDialog:new{
+            shrink_unneeded_width = true,
+            -- Open diagonally from the icon's bottom right corner, so the icon
+            -- stays visible at the dialog's top left, instead of in the middle
+            -- of the screen. The button's dimen includes its enlarged tap
+            -- zone, so take the icon's own edges; a zero-size point with
+            -- pop-down makes MovableContainer put the dialog's top left
+            -- corner there.
+            anchor = function()
+                local button = this.title_bar and this.title_bar.left_button
+                local dimen = button and button.dimen
+                if not dimen or not dimen.x then
+                    return nil
+                end
+                local icon = button.image and button.image:getSize()
+                local Geom = require("ui/geometry")
+                return Geom:new{
+                    x = dimen.x + (button.padding_left or 0) + (icon and icon.w or 0),
+                    y = dimen.y + (button.padding_top or 0) + (icon and icon.h or 0),
+                    w = 0,
+                    h = 0,
+                }, true
+            end,
+            buttons = {
+                {{
+                    text = _("Refresh"),
+                    align = "left",
+                    callback = function()
+                        UIManager:close(dialog)
+                        on_refresh(this)
+                    end,
+                }},
+                {{
+                    text = _("Mark all as read"),
+                    align = "left",
+                    callback = function()
+                        UIManager:close(dialog)
+                        on_mark_all_read(this)
+                    end,
+                }},
+                {{
+                    text = _("Cancel"),
+                    align = "left",
+                    callback = function()
+                        UIManager:close(dialog)
+                    end,
+                }},
+            },
+        }
+        UIManager:show(dialog)
         return true
     end
     return menu_instance

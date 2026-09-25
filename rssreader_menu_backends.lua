@@ -186,7 +186,7 @@ function backends.collectFeedsForMinifluxVirtual(self, client, virtual_node)
     return feed_ids
 end
 
-function backends.performMarkAllAsReadForCommaFeedVirtual(self, account, client, virtual_node)
+function backends.performMarkAllAsReadForCommaFeedVirtual(self, account, client, virtual_node, on_done)
     local feed_ids = backends.collectFeedsForCommaFeedVirtual(self, client, virtual_node)
     
     if #feed_ids == 0 then
@@ -242,6 +242,9 @@ function backends.performMarkAllAsReadForCommaFeedVirtual(self, account, client,
                                 text = string.format(_("Marked %d feed(s) as read."), success_count),
                                 timeout = 3,
                             })
+                            if on_done then
+                                on_done()
+                            end
                         end
                         
                         if #error_messages > 0 then
@@ -259,7 +262,7 @@ function backends.performMarkAllAsReadForCommaFeedVirtual(self, account, client,
     UIManager:show(dialog)
 end
 
-function backends.performMarkAllAsReadForFeverVirtual(self, account, client, virtual_node)
+function backends.performMarkAllAsReadForFeverVirtual(self, account, client, virtual_node, on_done)
     local feed_ids = backends.collectFeedsForFeverVirtual(self, client, virtual_node)
     
     if #feed_ids == 0 then
@@ -315,6 +318,9 @@ function backends.performMarkAllAsReadForFeverVirtual(self, account, client, vir
                                 text = string.format(_("Marked %d feed(s) as read."), success_count),
                                 timeout = 3,
                             })
+                            if on_done then
+                                on_done()
+                            end
                         end
                         
                         if #error_messages > 0 then
@@ -332,7 +338,7 @@ function backends.performMarkAllAsReadForFeverVirtual(self, account, client, vir
     UIManager:show(dialog)
 end
 
-function backends.performMarkAllAsReadForMinifluxVirtual(self, account, client, virtual_node)
+function backends.performMarkAllAsReadForMinifluxVirtual(self, account, client, virtual_node, on_done)
     local feed_ids = backends.collectFeedsForMinifluxVirtual(self, client, virtual_node)
     
     if #feed_ids == 0 then
@@ -388,6 +394,9 @@ function backends.performMarkAllAsReadForMinifluxVirtual(self, account, client, 
                                 text = string.format(_("Marked %d feed(s) as read."), success_count),
                                 timeout = 3,
                             })
+                            if on_done then
+                                on_done()
+                            end
                         end
                         
                         if #error_messages > 0 then
@@ -408,7 +417,7 @@ end
 -- FreshRSS special feeds are server streams, so one mark-all-as-read call
 -- clears them. "Today" is the exception: the call only takes an upper bound,
 -- and on the reading list that would clear every unread story, not today's.
-function backends.performMarkAllAsReadForFreshRSSSpecial(self, account, client, special_node)
+function backends.performMarkAllAsReadForFreshRSSSpecial(self, account, client, special_node, on_done)
     if special_node.id == "freshrss_today_unread" then
         UIManager:show(InfoMessage:new{
             text = _("FreshRSS cannot mark only today's stories as read. Use 'All Unread' or individual feeds."),
@@ -440,6 +449,9 @@ function backends.performMarkAllAsReadForFreshRSSSpecial(self, account, client, 
                                 or string.format(_("Failed to mark feed as read: %s"), err or _("Unknown error")),
                             timeout = 3,
                         })
+                        if ok and on_done then
+                            on_done()
+                        end
                     end)
                 end,
             },
@@ -534,13 +546,14 @@ function backends.showNewsBlurNode(self, account, client, node, opts)
         return
     end
 
+    local function refresh(this)
+        backends.showNewsBlurAccount(self, account, { force_refresh = true, focus = node, replace = this })
+    end
     local menu_instance = utils.newRefreshableMenu({
         title = node and node.title or (account and account.name) or _("NewsBlur"),
         item_table = entries,
         onMenuHold = utils.triggerHoldCallback,
-    }, function(this)
-        backends.showNewsBlurAccount(self, account, { force_refresh = true, focus = node, replace = this })
-    end)
+    }, refresh, self:markAllAsReadAction(account, client, node, refresh))
     self:showMenu(menu_instance, function()
         reopenTreeNode(self, account, client, node, backends.showNewsBlurAccount, backends.showNewsBlurNode)
     end, { replace = opts and opts.replace })
@@ -650,7 +663,7 @@ function backends.showNewsBlurFeed(self, account, client, feed_node, opts)
                 -- Not reusing the cache fetches page 1 again; the current
                 -- menu is updated in place since it shows this feed_node.
                 backends.showNewsBlurFeed(self, account, client, feed_node, { menu_page = 1 })
-            end)
+            end, self:storyListMarkAllAction(account, client, feed_node, context))
             menu_instance._rss_feed_node = feed_node
             menu_instance.onMenuHold = utils.triggerHoldCallback
             utils.ensureMenuCloseHook(menu_instance)
@@ -886,13 +899,14 @@ function backends.showCommaFeedNode(self, account, client, node, opts)
         return
     end
 
+    local function refresh(this)
+        backends.showCommaFeedAccount(self, account, { force_refresh = true, focus = node, replace = this })
+    end
     local menu_instance = utils.newRefreshableMenu({
         title = node and node.title or (account and account.name) or _("CommaFeed"),
         item_table = entries,
         onMenuHold = utils.triggerHoldCallback,
-    }, function(this)
-        backends.showCommaFeedAccount(self, account, { force_refresh = true, focus = node, replace = this })
-    end)
+    }, refresh, self:markAllAsReadAction(account, client, node, refresh))
     self:showMenu(menu_instance, function()
         reopenTreeNode(self, account, client, node, backends.showCommaFeedAccount, backends.showCommaFeedNode)
     end, { replace = opts and opts.replace })
@@ -1051,7 +1065,7 @@ function backends.showCommaFeedFeed(self, account, client, feed_node, opts)
                 -- Not reusing the cache fetches page 1 again; the current
                 -- menu is updated in place since it shows this feed_node.
                 backends.showCommaFeedFeed(self, account, client, feed_node, { menu_page = 1 })
-            end)
+            end, self:storyListMarkAllAction(account, client, feed_node, context))
             menu_instance._rss_feed_node = feed_node
             menu_instance.onMenuHold = utils.triggerHoldCallback
             utils.ensureMenuCloseHook(menu_instance)
@@ -1328,13 +1342,14 @@ function backends.showFreshRSSNode(self, account, client, node, opts)
         return
     end
 
+    local function refresh(this)
+        backends.showFreshRSSAccount(self, account, { force_refresh = true, focus = node, replace = this })
+    end
     local menu_instance = utils.newRefreshableMenu({
         title = node and node.title or (account and account.name) or _("FreshRSS"),
         item_table = entries,
         onMenuHold = utils.triggerHoldCallback,
-    }, function(this)
-        backends.showFreshRSSAccount(self, account, { force_refresh = true, focus = node, replace = this })
-    end)
+    }, refresh, self:markAllAsReadAction(account, client, node, refresh))
     self:showMenu(menu_instance, function()
         reopenTreeNode(self, account, client, node, backends.showFreshRSSAccount, backends.showFreshRSSNode)
     end, { replace = opts and opts.replace })
@@ -1469,7 +1484,7 @@ function backends.showFreshRSSFeed(self, account, client, feed_node, opts)
                 -- Not reusing the cache fetches page 1 again; the current
                 -- menu is updated in place since it shows this feed_node.
                 backends.showFreshRSSFeed(self, account, client, feed_node, { menu_page = 1 })
-            end)
+            end, self:storyListMarkAllAction(account, client, feed_node, context))
             menu_instance._rss_feed_node = feed_node
             menu_instance.onMenuHold = utils.triggerHoldCallback
             utils.ensureMenuCloseHook(menu_instance)
@@ -1662,13 +1677,14 @@ function backends.showFeverNode(self, account, client, node, opts)
         return
     end
 
+    local function refresh(this)
+        backends.showFeverAccount(self, account, { force_refresh = true, focus = node, replace = this })
+    end
     local menu_instance = utils.newRefreshableMenu({
         title = node and node.title or (account and account.name) or _("Fever API"),
         item_table = entries,
         onMenuHold = utils.triggerHoldCallback,
-    }, function(this)
-        backends.showFeverAccount(self, account, { force_refresh = true, focus = node, replace = this })
-    end)
+    }, refresh, self:markAllAsReadAction(account, client, node, refresh))
     self:showMenu(menu_instance, function()
         reopenTreeNode(self, account, client, node, backends.showFeverAccount, backends.showFeverNode)
     end, { replace = opts and opts.replace })
@@ -1770,7 +1786,7 @@ function backends.showFeverFeed(self, account, client, feed_node, opts)
                 -- Not reusing the cache fetches page 1 again; the current
                 -- menu is updated in place since it shows this feed_node.
                 backends.showFeverFeed(self, account, client, feed_node, { menu_page = 1 })
-            end)
+            end, self:storyListMarkAllAction(account, client, feed_node, context))
             menu_instance._rss_feed_node = feed_node
             menu_instance.onMenuHold = utils.triggerHoldCallback
             utils.ensureMenuCloseHook(menu_instance)
@@ -1909,13 +1925,14 @@ function backends.showMinifluxNode(self, account, client, node, opts)
         return
     end
 
+    local function refresh(this)
+        backends.showMinifluxAccount(self, account, { force_refresh = true, focus = node, replace = this })
+    end
     local menu_instance = utils.newRefreshableMenu({
         title = node and node.title or (account and account.name) or _("Miniflux"),
         item_table = entries,
         onMenuHold = utils.triggerHoldCallback,
-    }, function(this)
-        backends.showMinifluxAccount(self, account, { force_refresh = true, focus = node, replace = this })
-    end)
+    }, refresh, self:markAllAsReadAction(account, client, node, refresh))
     self:showMenu(menu_instance, function()
         reopenTreeNode(self, account, client, node, backends.showMinifluxAccount, backends.showMinifluxNode)
     end, { replace = opts and opts.replace })
@@ -2024,7 +2041,7 @@ function backends.showMinifluxFeed(self, account, client, feed_node, opts)
                 -- Not reusing the cache fetches page 1 again; the current
                 -- menu is updated in place since it shows this feed_node.
                 backends.showMinifluxFeed(self, account, client, feed_node, { menu_page = 1 })
-            end)
+            end, self:storyListMarkAllAction(account, client, feed_node, context))
             menu_instance._rss_feed_node = feed_node
             menu_instance.onMenuHold = utils.triggerHoldCallback
             utils.ensureMenuCloseHook(menu_instance)

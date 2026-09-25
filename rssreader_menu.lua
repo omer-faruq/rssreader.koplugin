@@ -978,7 +978,7 @@ function MenuBuilder:createLongPressMenuForLocalFeed(feed, account_name, normal_
     return dialog
 end
 
-function MenuBuilder:performLocalMarkAllAsRead(feed, account_name)
+function MenuBuilder:performLocalMarkAllAsRead(feed, account_name, on_done)
     if not feed or not feed.url then
         UIManager:show(InfoMessage:new{
             text = _("Feed URL is missing."),
@@ -1047,6 +1047,9 @@ function MenuBuilder:performLocalMarkAllAsRead(feed, account_name)
             text = string.format(_("Marked %d item(s) as read."), new_marks),
             timeout = 3,
         })
+        if on_done then
+            on_done()
+        end
     end)
 end
 
@@ -1179,7 +1182,7 @@ function MenuBuilder:showMarkAllAsReadDialogForLocalGroup(group, account_name)
     UIManager:show(dialog)
 end
 
-function MenuBuilder:showMarkAllAsReadDialogForAccount(account)
+function MenuBuilder:showMarkAllAsReadDialogForAccount(account, on_done)
     local title_text = string.format(_("Mark all stories in account '%s' as read?"), account.name or _("Account"))
 
     local dialog
@@ -1198,7 +1201,7 @@ function MenuBuilder:showMarkAllAsReadDialogForAccount(account)
                 background = Blitbuffer.COLOR_WHITE,
                 callback = function()
                     UIManager:close(dialog)
-                    self:performMarkAllAsReadForAccount(account)
+                    self:performMarkAllAsReadForAccount(account, on_done)
                 end,
             },
         }},
@@ -1206,7 +1209,7 @@ function MenuBuilder:showMarkAllAsReadDialogForAccount(account)
     UIManager:show(dialog)
 end
 
-function MenuBuilder:performMarkAllAsReadForAccount(account)
+function MenuBuilder:performMarkAllAsReadForAccount(account, on_done)
     local account_type = account and account.type
     if account_type == "freshrss" then
         -- One call on the reading list covers every subscription.
@@ -1226,6 +1229,9 @@ function MenuBuilder:performMarkAllAsReadForAccount(account)
                     or string.format(_("Failed to mark account as read: %s"), err or _("Unknown error")),
                 timeout = 3,
             })
+            if ok and on_done then
+                on_done()
+            end
         end)
         return
     end
@@ -1301,6 +1307,9 @@ function MenuBuilder:performMarkAllAsReadForAccount(account)
                 text = string.format(_("Marked %d feed(s) as read."), success_count),
                 timeout = 3,
             })
+            if on_done then
+                on_done()
+            end
         end
 
         if #error_messages > 0 then
@@ -1313,7 +1322,61 @@ function MenuBuilder:performMarkAllAsReadForAccount(account)
     end)
 end
 
-function MenuBuilder:showMarkAllAsReadDialog(account, client, node)
+-- The title bar's "Mark all as read" for a tree or story list of node, or nil
+-- where there is no working mark-all (the menu then keeps a plain refresh
+-- icon). on_done(menu) runs after a successful mark.
+function MenuBuilder:markAllAsReadAction(account, client, node, on_done)
+    if not node then
+        return nil
+    end
+    local account_type = account and account.type
+    local run
+    if node.kind == "feed" then
+        if account_type == "freshrss" and node.is_special_feed then
+            if node.id == "freshrss_today_unread" then
+                return nil
+            end
+        elseif node._tag then
+            -- CommaFeed tags: the virtual-feed path would mark every feed.
+            return nil
+        elseif (node._virtual or node.is_virtual)
+                and account_type ~= "commafeed" and account_type ~= "fever" and account_type ~= "miniflux" then
+            return nil
+        end
+        -- Like the feed's long-press action: no confirmation for one feed.
+        run = function(done) self:performMarkAllAsRead(account, client, node, done) end
+    elseif node.kind == "folder" then
+        run = function(done) self:showMarkAllAsReadDialog(account, client, node, done) end
+    elseif node.kind == "root" then
+        if account_type == "freshrss" then
+            -- One reading-list call instead of one per feed.
+            run = function(done) self:showMarkAllAsReadDialogForAccount(account, done) end
+        else
+            run = function(done) self:showMarkAllAsReadDialog(account, client, node, done) end
+        end
+    else
+        return nil
+    end
+    return function(menu)
+        run(function() on_done(menu) end)
+    end
+end
+
+-- Story lists also mark their loaded stories read, so the list loses its bold
+-- without a refetch (which, on unread-only lists, would come back empty). The
+-- stories are saved before the rebuild: context.refresh reloads them from the
+-- saved feed state, which would otherwise bring the unread copies back.
+function MenuBuilder:storyListMarkAllAction(account, client, feed_node, context)
+    return self:markAllAsReadAction(account, client, feed_node, function()
+        for _, story in ipairs(feed_node._rss_stories or {}) do
+            utils.setStoryReadState(story, true)
+        end
+        self:_updateFeedCache(context)
+        context.refresh()
+    end)
+end
+
+function MenuBuilder:showMarkAllAsReadDialog(account, client, node, on_done)
     local node_type = node and node.kind or "root"
     local title_text
     if node_type == "feed" then
@@ -1340,7 +1403,7 @@ function MenuBuilder:showMarkAllAsReadDialog(account, client, node)
                 background = Blitbuffer.COLOR_WHITE,
                 callback = function()
                     UIManager:close(dialog)
-                    self:performMarkAllAsRead(account, client, node)
+                    self:performMarkAllAsRead(account, client, node, on_done)
                 end,
             },
         }},
@@ -1348,25 +1411,25 @@ function MenuBuilder:showMarkAllAsReadDialog(account, client, node)
     UIManager:show(dialog)
 end
 
-function MenuBuilder:performMarkAllAsRead(account, client, node)
+function MenuBuilder:performMarkAllAsRead(account, client, node, on_done)
     local node_type = node and node.kind
     local account_type = account and account.type
 
     if node_type == "feed" then
         if account_type == "freshrss" and node.is_special_feed then
-            backends.performMarkAllAsReadForFreshRSSSpecial(self, account, client, node)
+            backends.performMarkAllAsReadForFreshRSSSpecial(self, account, client, node, on_done)
             return
         end
         if node._virtual or node.is_virtual then
             -- Handle virtual feeds for different account types
             if account_type == "commafeed" then
-                backends.performMarkAllAsReadForCommaFeedVirtual(self, account, client, node)
+                backends.performMarkAllAsReadForCommaFeedVirtual(self, account, client, node, on_done)
                 return
             elseif account_type == "fever" then
-                backends.performMarkAllAsReadForFeverVirtual(self, account, client, node)
+                backends.performMarkAllAsReadForFeverVirtual(self, account, client, node, on_done)
                 return
             elseif account_type == "miniflux" then
-                backends.performMarkAllAsReadForMinifluxVirtual(self, account, client, node)
+                backends.performMarkAllAsReadForMinifluxVirtual(self, account, client, node, on_done)
                 return
             end
             
@@ -1390,6 +1453,9 @@ function MenuBuilder:performMarkAllAsRead(account, client, node)
                     text = string.format(_("Marked feed '%s' as read."), node.title or _("Feed")),
                     timeout = 3,
                 })
+                if on_done then
+                    on_done()
+                end
             else
                 UIManager:show(InfoMessage:new{
                     text = string.format(_("Failed to mark feed as read: %s"), err or _("Unknown error")),
@@ -1451,6 +1517,9 @@ function MenuBuilder:performMarkAllAsRead(account, client, node)
                         text = string.format(_("Marked %d feed(s) in folder as read."), success_count),
                         timeout = 3,
                     })
+                    if on_done then
+                        on_done()
+                    end
                 end
 
                 if #errors > 0 then
@@ -1465,6 +1534,9 @@ function MenuBuilder:performMarkAllAsRead(account, client, node)
                     text = string.format(_("Marked folder '%s' as read."), node.title or _("Folder")),
                     timeout = 3,
                 })
+                if on_done then
+                    on_done()
+                end
             end
         end)
         return
@@ -1503,6 +1575,9 @@ function MenuBuilder:performMarkAllAsRead(account, client, node)
                 text = string.format(_("Marked %d feed(s) as read."), success_count),
                 timeout = 3,
             })
+            if on_done then
+                on_done()
+            end
         end
 
         if #error_messages > 0 then
@@ -1717,6 +1792,8 @@ function MenuBuilder:showLocalFeed(feed, opts)
                     menu_page = 1,
                     refresh = true,
                 })
+            end, function()
+                self:performLocalMarkAllAsRead(feed, account_name, context.refresh)
             end)
             menu_instance._rss_feed_node = feed_node
             menu_instance.onMenuHold = utils.triggerHoldCallback
