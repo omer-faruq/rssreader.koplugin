@@ -757,6 +757,49 @@ function RSSReader:updateBackButton(menu_instance)
     hookBackButtonIntoLayout(menu_instance)
 end
 
+-- "Next" at the end of an article opened as a document. The list it came from
+-- is gone by now (and so is the plugin instance that showed it), so restore it
+-- exactly like "Back to RSS list" does, find the article in it, and open the
+-- next story the way the list would -- which also closes the restored list
+-- again, before anything is repainted.
+function RSSReader:openAdjacentArticle(only_unread)
+    local utils = require("rssreader_menu_utils")
+    local story_key = ReaderReturn and ReaderReturn.getArticleStoryKey()
+    self:openAccountList({ force_restore = true })
+
+    local menu = self.current_menu_info and self.current_menu_info.menu
+    local context = menu and menu._rss_story_context
+    local builder = menu and menu._rss_builder
+    local stories = context and context.feed_node and context.feed_node._rss_stories
+    local index
+    for i, story in ipairs(stories or {}) do
+        if story_key and utils.storyUniqueKey(story) == story_key then
+            index = i
+            break
+        end
+    end
+    if not index or not builder then
+        -- The restored list stays up, which is the next best thing.
+        UIManager:show(InfoMessage:new{
+            text = _("Could not find this article in its list."),
+            timeout = 3,
+        })
+        return
+    end
+
+    local next_index = utils.findNextIndex(stories, index, function(story)
+        return not only_unread or utils.isUnread(story)
+    end)
+    if not next_index or next_index == index then
+        UIManager:show(InfoMessage:new{
+            text = only_unread and _("No unread stories found.") or _("No more stories."),
+            timeout = 3,
+        })
+        return
+    end
+    builder:openStoryDocument(stories, next_index, context)
+end
+
 -- Leaving the list at root level while it sits on top of an article opened
 -- from it: close that article too, see ReaderReturn.closeArticle.
 function RSSReader:leaveArticleUnderneath()

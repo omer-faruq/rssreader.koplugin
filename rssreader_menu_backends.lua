@@ -619,6 +619,9 @@ function backends.showNewsBlurFeed(self, account, client, feed_node, opts)
 
         if menu_instance then
             context.menu_instance = menu_instance
+            -- For RSSReader:openAdjacentArticle, which finds them on a restored list.
+            menu_instance._rss_story_context = context
+            menu_instance._rss_builder = self
             menu_instance._rss_feed_node = feed_node
             menu_instance.onMenuHold = utils.triggerHoldCallback
             utils.ensureMenuCloseHook(menu_instance)
@@ -1017,6 +1020,9 @@ function backends.showCommaFeedFeed(self, account, client, feed_node, opts)
 
         if menu_instance then
             context.menu_instance = menu_instance
+            -- For RSSReader:openAdjacentArticle, which finds them on a restored list.
+            menu_instance._rss_story_context = context
+            menu_instance._rss_builder = self
             menu_instance._rss_feed_node = feed_node
             menu_instance.onMenuHold = utils.triggerHoldCallback
             utils.ensureMenuCloseHook(menu_instance)
@@ -1432,6 +1438,9 @@ function backends.showFreshRSSFeed(self, account, client, feed_node, opts)
 
         if menu_instance then
             context.menu_instance = menu_instance
+            -- For RSSReader:openAdjacentArticle, which finds them on a restored list.
+            menu_instance._rss_story_context = context
+            menu_instance._rss_builder = self
             menu_instance._rss_feed_node = feed_node
             menu_instance.onMenuHold = utils.triggerHoldCallback
             utils.ensureMenuCloseHook(menu_instance)
@@ -1730,6 +1739,9 @@ function backends.showFeverFeed(self, account, client, feed_node, opts)
 
         if menu_instance then
             context.menu_instance = menu_instance
+            -- For RSSReader:openAdjacentArticle, which finds them on a restored list.
+            menu_instance._rss_story_context = context
+            menu_instance._rss_builder = self
             menu_instance._rss_feed_node = feed_node
             menu_instance.onMenuHold = utils.triggerHoldCallback
             utils.ensureMenuCloseHook(menu_instance)
@@ -1981,6 +1993,9 @@ function backends.showMinifluxFeed(self, account, client, feed_node, opts)
 
         if menu_instance then
             context.menu_instance = menu_instance
+            -- For RSSReader:openAdjacentArticle, which finds them on a restored list.
+            menu_instance._rss_story_context = context
+            menu_instance._rss_builder = self
             menu_instance._rss_feed_node = feed_node
             menu_instance.onMenuHold = utils.triggerHoldCallback
             utils.ensureMenuCloseHook(menu_instance)

@@ -1495,6 +1495,7 @@ end
 -- opts.rss_return: this story is being opened from a feed list, so the reader
 -- may offer a way back to it. Left unset by the sanitized-link paths, which
 -- write to the same cache but are opened from inside some other book.
+-- opts.story_key: which story of that list it is (utils.storyUniqueKey).
 function utils.downloadStoryToCache(story, builder, on_complete, opts)
     local cache_dir = utils.buildCacheDirectory()
     local filename = utils.safeFilenameFromStory(story)
@@ -1550,7 +1551,7 @@ function utils.downloadStoryToCache(story, builder, on_complete, opts)
             timeout = 2,
         })
         if opts and opts.rss_return and utils.ReaderReturn then
-            pcall(utils.ReaderReturn.markArticle, target_path)
+            pcall(utils.ReaderReturn.markArticle, target_path, opts.story_key)
         end
         FileManager:openFile(target_path)
         if on_complete then

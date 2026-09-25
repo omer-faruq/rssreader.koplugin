@@ -145,6 +145,7 @@ end
 -- (package.loaded outlives both) and dies with the process, which is also when
 -- the saved navigation state stops being worth restoring.
 local marked_article = nil
+local marked_story_key = nil
 
 local function normalizePath(path)
     if type(path) ~= "string" or path == "" then
@@ -153,12 +154,20 @@ local function normalizePath(path)
     return (path:gsub("\\", "/"):gsub("//+", "/"))
 end
 
-function ReaderReturn.markArticle(path)
+-- story_key: the story's utils.storyUniqueKey, so "Next" at the end of the
+-- article can find its place in the list again.
+function ReaderReturn.markArticle(path, story_key)
     marked_article = normalizePath(path)
+    marked_story_key = story_key
 end
 
 function ReaderReturn.forgetArticle()
     marked_article = nil
+    marked_story_key = nil
+end
+
+function ReaderReturn.getArticleStoryKey()
+    return marked_story_key
 end
 
 function ReaderReturn.isArticle(path)
@@ -411,6 +420,9 @@ function ReaderReturn.refreshTouchZone(plugin)
 end
 
 function ReaderReturn.showEndOfArticleDialog(plugin)
+    -- Needs to know which story this is; articles opened before this existed,
+    -- or from the List, do not.
+    local can_go_next = marked_story_key ~= nil and type(plugin.openAdjacentArticle) == "function"
     local dialog
     dialog = ButtonDialog:new{
         name = "rssreader_end_of_article",
@@ -424,6 +436,24 @@ function ReaderReturn.showEndOfArticleDialog(plugin)
                     ReaderReturn.returnToList(plugin)
                 end,
             }},
+            {
+                {
+                    text = _("Next"),
+                    enabled = can_go_next,
+                    callback = function()
+                        UIManager:close(dialog)
+                        try("opening the next article", plugin.openAdjacentArticle, plugin, false)
+                    end,
+                },
+                {
+                    text = _("Next unread"),
+                    enabled = can_go_next,
+                    callback = function()
+                        UIManager:close(dialog)
+                        try("opening the next unread article", plugin.openAdjacentArticle, plugin, true)
+                    end,
+                },
+            },
             {
                 {
                     text = _("Go to beginning"),

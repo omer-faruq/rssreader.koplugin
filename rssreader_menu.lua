@@ -32,6 +32,16 @@ local LocalReadState
 local MenuBuilder = {}
 MenuBuilder.__index = MenuBuilder
 
+-- Open a story as a document in the reader, marking it read first.
+function MenuBuilder:openStoryDocument(stories, index, context)
+    local story = stories[index]
+    utils.normalizeStoryReadState(story)
+    if utils.isUnread(story) then
+        self:handleStoryAction(stories, index, "mark_read", story, context)
+    end
+    self:handleStoryAction(stories, index, "go_to_link", { story = story }, context)
+end
+
 function MenuBuilder:createTapCallback(stories, index, context)
     local reader = self.reader
     local tap_action = "preview"
@@ -43,11 +53,7 @@ function MenuBuilder:createTapCallback(stories, index, context)
     
     if tap_action == "open" then
         return function()
-            utils.normalizeStoryReadState(story)
-            if utils.isUnread(story) then
-                self:handleStoryAction(stories, index, "mark_read", story, context)
-            end
-            self:handleStoryAction(stories, index, "go_to_link", { story = story }, context)
+            self:openStoryDocument(stories, index, context)
         end
     elseif tap_action == "save" then
         return function()
@@ -271,7 +277,7 @@ function MenuBuilder:handleStoryAction(stories, index, action, payload, context)
                     UIManager:show(InfoMessage:new{ text = string.format(_("Opening: %s"), link) })
                 end
             end
-        end, { rss_return = true })
+        end, { rss_return = true, story_key = utils.storyUniqueKey(target_story) })
         return
     end
 
@@ -1698,6 +1704,9 @@ function MenuBuilder:showLocalFeed(feed, opts)
 
         if menu_instance then
             context.menu_instance = menu_instance
+            -- For RSSReader:openAdjacentArticle, which finds them on a restored list.
+            menu_instance._rss_story_context = context
+            menu_instance._rss_builder = self
             menu_instance._rss_feed_node = feed_node
             menu_instance.onMenuHold = utils.triggerHoldCallback
             utils.ensureMenuCloseHook(menu_instance)
