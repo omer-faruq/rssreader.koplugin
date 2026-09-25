@@ -301,16 +301,28 @@ function ReaderReturn.closeArticle(plugin)
     if ReaderUI.instance ~= ui then
         return false
     end
-    return (try("closing the article", function()
-        -- The article's own folder is the RSS cache; the home folder is
-        -- where the user actually wants to be.
-        local home_dir = G_reader_settings:readSetting("home_dir")
+    -- The article's own folder is the RSS cache; the home folder is where the
+    -- user actually wants to be.
+    local home_dir = G_reader_settings:readSetting("home_dir")
+    local closed = try("closing the article", function()
         if home_dir then
             ui.last_dir_for_file_browser = home_dir
         end
         ui:onClose()
-        ui:showFileManager()
-    end))
+    end)
+    if closed then
+        try("showing the file browser", ui.showFileManager, ui)
+    end
+    -- Whatever failed above, something must be on screen before the next
+    -- repaint: UIManager quits KOReader once no window is left. If neither the
+    -- reader nor a file browser is up, open one directly.
+    local FileManager = require("apps/filemanager/filemanager")
+    if not FileManager.instance and not UIManager:isWidgetShown(ui) then
+        try("showing the file browser directly", function()
+            FileManager:showFiles(home_dir)
+        end)
+    end
+    return closed
 end
 
 --------------------------------------------------------------------

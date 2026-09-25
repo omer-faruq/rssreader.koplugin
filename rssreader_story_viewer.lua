@@ -553,12 +553,29 @@ end
 -- ScrollHtmlWidget handles PgFwd/PgBack itself while it can still turn a page
 -- and lets the key propagate up to the dialog only on the last/first page, so
 -- these bindings never steal a page turn.
-local function installStoryNavKeys(viewer_dialog, story, on_action, close_viewer)
+local function installStoryNavKeys(viewer_dialog, html_widget, story, on_action, close_viewer)
     local mode = StoryViewer.getStoryNavKeysMode()
     if not on_action or mode == "off" then
         return
     end
+    -- Checked here too rather than trusting the propagation alone: should
+    -- ScrollHtmlWidget ever pass page keys up mid-article, the worst outcome
+    -- is that this does nothing, never that page turns become article jumps.
+    local function atEdge(direction)
+        local box = html_widget and html_widget.htmlbox_widget
+        local page, count = box and box.page_number, box and box.page_count
+        if type(page) ~= "number" or type(count) ~= "number" then
+            return false
+        end
+        if direction > 0 then
+            return page >= count
+        end
+        return page <= 1
+    end
     local function navigate(direction)
+        if not atEdge(direction) then
+            return false
+        end
         local action
         if direction > 0 then
             action = mode == "next_unread" and "next_unread" or "next_story"
@@ -842,7 +859,7 @@ function StoryViewer:_showStoryNow(story, on_action, on_close, options)
             closeAll()
             return true
         end
-        installStoryNavKeys(viewer_dialog, story, on_action, closeAll)
+        installStoryNavKeys(viewer_dialog, html_widget, story, on_action, closeAll)
     end
 
     html_widget.dialog = viewer_dialog
