@@ -405,6 +405,49 @@ function backends.performMarkAllAsReadForMinifluxVirtual(self, account, client, 
     UIManager:show(dialog)
 end
 
+-- FreshRSS special feeds are server streams, so one mark-all-as-read call
+-- clears them. "Today" is the exception: the call only takes an upper bound,
+-- and on the reading list that would clear every unread story, not today's.
+function backends.performMarkAllAsReadForFreshRSSSpecial(self, account, client, special_node)
+    if special_node.id == "freshrss_today_unread" then
+        UIManager:show(InfoMessage:new{
+            text = _("FreshRSS cannot mark only today's stories as read. Use 'All Unread' or individual feeds."),
+            timeout = 4,
+        })
+        return
+    end
+
+    local dialog
+    dialog = ButtonDialog:new{
+        title = string.format(_("Mark all stories in '%s' as read?"), special_node.title or _("Feed")),
+        buttons = {{
+            {
+                text = _("Cancel"),
+                background = Blitbuffer.COLOR_WHITE,
+                callback = function()
+                    UIManager:close(dialog)
+                end,
+            },
+            {
+                text = _("Mark all as read"),
+                background = Blitbuffer.COLOR_WHITE,
+                callback = function()
+                    UIManager:close(dialog)
+                    NetworkMgr:runWhenOnline(function()
+                        local ok, err = client:markStreamAsRead(special_node.api_feed_id)
+                        UIManager:show(InfoMessage:new{
+                            text = ok and string.format(_("Marked feed '%s' as read."), special_node.title or _("Feed"))
+                                or string.format(_("Failed to mark feed as read: %s"), err or _("Unknown error")),
+                            timeout = 3,
+                        })
+                    end)
+                end,
+            },
+        }},
+    }
+    UIManager:show(dialog)
+end
+
 function backends.showNewsBlurAccount(self, account, opts)
     opts = opts or {}
     if not self.accounts or type(self.accounts.getNewsBlurClient) ~= "function" then

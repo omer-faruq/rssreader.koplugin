@@ -1208,6 +1208,27 @@ end
 
 function MenuBuilder:performMarkAllAsReadForAccount(account)
     local account_type = account and account.type
+    if account_type == "freshrss" then
+        -- One call on the reading list covers every subscription.
+        local client = self.accounts and type(self.accounts.getFreshRSSClient) == "function"
+            and self.accounts:getFreshRSSClient(account)
+        if not client then
+            UIManager:show(InfoMessage:new{
+                text = _("Unable to access account."),
+                timeout = 3,
+            })
+            return
+        end
+        NetworkMgr:runWhenOnline(function()
+            local ok, err = client:markStreamAsRead(client:getReadingListStreamId())
+            UIManager:show(InfoMessage:new{
+                text = ok and string.format(_("Marked account '%s' as read."), account.name or _("Account"))
+                    or string.format(_("Failed to mark account as read: %s"), err or _("Unknown error")),
+                timeout = 3,
+            })
+        end)
+        return
+    end
     if account_type ~= "newsblur" and account_type ~= "commafeed" then
         UIManager:show(InfoMessage:new{
             text = _("Account type not supported."),
@@ -1332,6 +1353,10 @@ function MenuBuilder:performMarkAllAsRead(account, client, node)
     local account_type = account and account.type
 
     if node_type == "feed" then
+        if account_type == "freshrss" and node.is_special_feed then
+            backends.performMarkAllAsReadForFreshRSSSpecial(self, account, client, node)
+            return
+        end
         if node._virtual or node.is_virtual then
             -- Handle virtual feeds for different account types
             if account_type == "commafeed" then
@@ -1393,6 +1418,8 @@ function MenuBuilder:performMarkAllAsRead(account, client, node)
             elseif account_type == "commafeed" and client.markCategoryAsRead then
                 success, error_msg = client:markCategoryAsRead(node.id)
             elseif account_type == "miniflux" and client.markCategoryAsRead then
+                success, error_msg = client:markCategoryAsRead(node.id)
+            elseif account_type == "freshrss" and client.markCategoryAsRead then
                 success, error_msg = client:markCategoryAsRead(node.id)
             end
 

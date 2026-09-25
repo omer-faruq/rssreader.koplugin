@@ -19,6 +19,8 @@ local USER_AGENT = "KOReader RSSReader"
 local READ_TAG = "user/-/state/com.google/read"
 -- Also the id of the stream that lists every favourite.
 local STARRED_TAG = "user/-/state/com.google/starred"
+-- Every entry of every subscription.
+local READING_LIST = "user/-/state/com.google/reading-list"
 
 local function requestWithScheme(options)
     local parsed_url = url.parse(options.url)
@@ -191,7 +193,7 @@ function FreshRSS:getEditToken()
 end
 
 -- Perform an authorized API request
-function FreshRSS:authorizedRequest(method, path, query_params, body)
+function FreshRSS:authorizedRequest(method, path, query_params, body, is_retry)
     local ok, err = self:authenticate()
     if not ok then
         return false, err
@@ -224,18 +226,22 @@ function FreshRSS:authorizedRequest(method, path, query_params, body)
     local numeric_code = tonumber(code)
     if not numeric_code or numeric_code < 200 or numeric_code >= 300 then
         -- If unauthorized, clear token and retry once
-        if numeric_code == 401 and self.last_login ~= nil then
+        -- Only once: a 401 that survives a fresh login (a rejected edit-token
+        -- answers 401 too) would otherwise retry forever.
+        if numeric_code == 401 and self.last_login ~= nil and not is_retry then
             self.auth_token = nil
             self.last_login = nil
             logger.warn("FreshRSS auth token expired, retrying...")
-            return self:authorizedRequest(method, path, query_params, body)
+            return self:authorizedRequest(method, path, query_params, body, true)
         end
         return false, string.format("FreshRSS request failed (HTTP %s - %s)", code, status)
     end
 
     local text = table.concat(response_chunks)
-    -- For edit-tag, response is just "OK"
-    if path == "/api/greader.php/reader/api/0/edit-tag" or path == "/api/greader.php/reader/api/0/token" then
+    -- For edit-tag and mark-all-as-read, response is just "OK"
+    if path == "/api/greader.php/reader/api/0/edit-tag"
+        or path == "/api/greader.php/reader/api/0/mark-all-as-read"
+        or path == "/api/greader.php/reader/api/0/token" then
         return true, text
     end
 
@@ -503,8 +509,44 @@ function FreshRSS:markStoryAsUnread(feed_id, story)
     return self:markStory(story, nil, READ_TAG)
 end
 
+-- Marks every entry of a stream read in one call: a feed ("feed/221"), a
+-- label ("user/-/label/News") or a state stream (reading-list, starred).
+-- edit-tag cannot do this — it reads "feed/221" as the entry id 0x221.
+-- ts is the newest entry id to mark; FreshRSS entry ids are microsecond
+-- timestamps, so "now" leaves entries that arrive meanwhile unread.
+function FreshRSS:markStreamAsRead(stream_id, is_retry)
+    if not stream_id then return false, "Missing stream ID" end
+    local ok, token = self:getEditToken()
+    if not ok then return false, token end
+
+    local body_string = encodeQuery({
+        T = token,
+        s = stream_id,
+        ts = tostring(os.time()) .. "000000",
+    }):gsub("^%?", "")
+
+    local ok2, err = self:authorizedRequest("POST", "/api/greader.php/reader/api/0/mark-all-as-read", nil, body_string)
+    if not ok2 then
+        -- A rejected edit-token answers 401: fetch a new one, once.
+        if not is_retry and tostring(err):find("HTTP 401") then
+            self.token_cache = nil
+            return self:markStreamAsRead(stream_id, true)
+        end
+        return false, err
+    end
+    return true
+end
+
 function FreshRSS:markFeedAsRead(feed_id)
-    return self:markStory({ id = feed_id }, READ_TAG, nil)
+    return self:markStreamAsRead(feed_id)
+end
+
+function FreshRSS:markCategoryAsRead(label_id)
+    return self:markStreamAsRead(label_id)
+end
+
+function FreshRSS:getReadingListStreamId()
+    return READING_LIST
 end
 
 -- Favourites. The generic story menu shows the Star / Unstar button, and the
