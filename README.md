@@ -89,6 +89,7 @@ NewsBlur, CommaFeed, Miniflux, and Fever API accounts include special virtual fe
 ### Mark All as Read for Virtual Feeds
 - **CommaFeed & Miniflux**: Virtual feeds support "Mark all as read" functionality. Long-press a virtual feed to mark all stories in that view as read.
 - **Fever API**: Long-press a virtual feed → **Mark all as read**. After a confirmation, every subscribed feed is marked as read one by one, so this can take a while with many subscriptions.
+- **FreshRSS**: Long-press **All Unread** or **Starred** → **Mark all as read**. *Today (Unread)* cannot be marked as read in bulk.
 - **NewsBlur**: Virtual feeds cannot be marked as read in bulk. Use individual feeds for "Mark all as read" functionality.
 
 ## Starring Articles (CommaFeed, FreshRSS)
