@@ -17,6 +17,7 @@ local HtmlResources = require("rssreader_html_resources")
 local FiveFiltersSanitizer = require("sanitizers/rssreader_sanitizer_fivefilters")
 local DiffbotSanitizer = require("sanitizers/rssreader_sanitizer_diffbot")
 local InstaparserSanitizer = require("sanitizers/rssreader_sanitizer_instaparser")
+local FeedbinSanitizer = require("sanitizers/rssreader_sanitizer_feedbin")
 local SanitizerQuota = require("sanitizers/rssreader_sanitizer_quota")
 local Trapper = require("ui/trapper")
 local sha2 = require("ffi/sha2")
@@ -823,6 +824,7 @@ local SANITIZER_LABELS = {
     fivefilters_rapidapi = "FiveFilters (RapidAPI)",
     diffbot = "Diffbot",
     instaparser = "Instaparser",
+    feedbin = "Feedbin",
 }
 
 function utils.collectActiveSanitizers(builder)
@@ -1126,10 +1128,20 @@ function utils.fetchStoryContent(story, builder, on_complete, options)
     NetworkMgr:runWhenOnline(function()
         UIManager:nextTick(function()
             local configured_sanitizers = utils.collectActiveSanitizers(builder)
-            if (not configured_sanitizers or #configured_sanitizers == 0) and utils.shouldUseFiveFilters(builder) then
+            -- The feedbin entry only covers Feedbin stories, so it does not
+            -- count as a configured sanitizer here.
+            local has_general_sanitizer = false
+            for _, entry in ipairs(configured_sanitizers or {}) do
+                if entry.type:lower() ~= "feedbin" then
+                    has_general_sanitizer = true
+                    break
+                end
+            end
+            if not has_general_sanitizer and utils.shouldUseFiveFilters(builder) then
                 local fallback_sanitizer = utils.defaultFiveFiltersSanitizer(builder)
                 if fallback_sanitizer then
-                    configured_sanitizers = { fallback_sanitizer }
+                    configured_sanitizers = configured_sanitizers or {}
+                    table.insert(configured_sanitizers, fallback_sanitizer)
                 end
             end
 
@@ -1402,6 +1414,16 @@ function utils.fetchStoryContent(story, builder, on_complete, options)
                     end
 
                     local sanitizer_type = sanitizer.type and sanitizer.type:lower() or ""
+                    -- Feedbin's extraction only exists for Feedbin stories;
+                    -- skip it silently for everything else.
+                    local feedbin_url
+                    if sanitizer_type == "feedbin" then
+                        feedbin_url = FeedbinSanitizer.extractionUrl(story)
+                        if not feedbin_url then
+                            processSanitizer(index + 1)
+                            return
+                        end
+                    end
                     local sanitizer_label = SANITIZER_LABELS[sanitizer_type] or sanitizer_type
                     if sanitizer_label == "" then sanitizer_label = "?" end
                     showProgress(T(_("Trying sanitizer (%1)…"), sanitizer_label))
@@ -1522,6 +1544,25 @@ function utils.fetchStoryContent(story, builder, on_complete, options)
                             end
 
                             finalizeContent(instaparser_html, true)
+                        end)
+                    elseif sanitizer_type == "feedbin" then
+                        FeedbinSanitizer.fetchArticle(feedbin_url, function(content, err)
+                            if cancelled then
+                                safeComplete(nil, "cancelled")
+                                return
+                            end
+                            if not content then
+                                processSanitizer(index + 1)
+                                return
+                            end
+
+                            local feedbin_html = FeedbinSanitizer.parseResponse(content)
+                            if not feedbin_html or not FeedbinSanitizer.contentIsMeaningful(feedbin_html) then
+                                processSanitizer(index + 1)
+                                return
+                            end
+
+                            finalizeContent(feedbin_html, true)
                         end)
                     else
                         logger.info("RSSReader", "Unknown sanitizer type", sanitizer.type)

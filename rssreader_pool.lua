@@ -114,6 +114,7 @@ local function serializeStory(story)
         "media_thumbnail", "media_content", "image_urls",
         "_rss_is_read", "_rss_marked_read",
         "_from_virtual_feed", "_is_from_virtual_feed",
+        "extracted_content_url",
     }
     local result = {}
     for _, field in ipairs(fields) do

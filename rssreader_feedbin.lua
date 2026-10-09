@@ -150,6 +150,8 @@ local function normalizeEntry(entry, unread_set, starred_set, feed_titles)
     local permalink = stringOrNil(entry.url)
     story.permalink = permalink
     story.story_permalink = permalink
+    -- Pre-signed full-article extraction, used by the "feedbin" sanitizer.
+    story.extracted_content_url = stringOrNil(entry.extracted_content_url)
 
     local content = stringOrNil(entry.content) or stringOrNil(entry.summary) or ""
     story.content = content

@@ -82,7 +82,15 @@ return {
             active = false, -- set to true to enable this account
         },
     },
-    sanitizers = { -- available types = fivefilters, fivefilters_rapidapi, diffbot, instaparser
+    sanitizers = { -- available types = feedbin, fivefilters, fivefilters_rapidapi, diffbot, instaparser
+        {
+            -- Feedbin's own full-article extraction. Free and needs no token,
+            -- but only applies to stories from a Feedbin account; other
+            -- stories go straight to the next sanitizer.
+            order = 0,
+            type = "feedbin",
+            active = false,
+        },
         {
             order = 1,
             type = "fivefilters",
