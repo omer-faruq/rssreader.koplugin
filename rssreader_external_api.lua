@@ -142,7 +142,7 @@ function ExternalAPI.saveSanitized(url, title, target_directory, on_complete)
             
             local page_title = content:match([[<title[^>]*>(.-)</title>]])
             if page_title then
-                page_title = util.htmlToPlainTextIfHtml(page_title)
+                page_title = util.htmlToPlainText(page_title)
             end
             
             if not page_title or page_title == "" then
@@ -156,7 +156,7 @@ function ExternalAPI.saveSanitized(url, title, target_directory, on_complete)
             
             title_for_filename = title_for_filename:gsub("^%s+", ""):gsub("%s+$", "")
             
-            local safe_title = utils.sanitizeFilenameComponent(title_for_filename)
+            local safe_title = utils.titleFilenameComponent(title_for_filename)
             local title_filename = safe_title .. ".html"
             
             if page_title then

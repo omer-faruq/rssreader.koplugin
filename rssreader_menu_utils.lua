@@ -962,6 +962,17 @@ function utils.truncateUtf8Bytes(str, max_bytes)
     return table.concat(parts)
 end
 
+-- A filename (without extension) from a title: never empty, so a title of
+-- only punctuation does not become a hidden ".html", and capped like
+-- safeFilenameFromStory so a long title stays under the filesystem's limit.
+function utils.titleFilenameComponent(title)
+    local safe_title = utils.truncateUtf8Bytes(utils.sanitizeFilenameComponent(title), 64)
+    if safe_title == "" then
+        return "story"
+    end
+    return safe_title
+end
+
 function utils.safeFilenameFromStory(story)
     if not story then
         return string.format("story_%d.html", os.time())
@@ -1615,14 +1626,17 @@ function utils.downloadStoryToCache(story, builder, on_complete, opts)
         if html_for_epub then
             page_title = html_for_epub:match([[<title[^>]*>(.-)</title>]])
             if page_title then
-                page_title = util.htmlToPlainTextIfHtml(page_title)
+                -- <title> text is always HTML-encoded (wrapHtmlForEpub escapes
+                -- it), so decode it even when it holds no tags; the IfHtml
+                -- variant left "n&#39;t" in titles and filenames.
+                page_title = util.htmlToPlainText(page_title)
             end
         end
         
         if not page_title or page_title == "" then
             page_title = content:match([[<title[^>]*>(.-)</title>]])
             if page_title then
-                page_title = util.htmlToPlainTextIfHtml(page_title)
+                page_title = util.htmlToPlainText(page_title)
             end
         end
         
@@ -1632,7 +1646,7 @@ function utils.downloadStoryToCache(story, builder, on_complete, opts)
         
         page_title = page_title:gsub("^%s+", ""):gsub("%s+$", "")
         
-        local safe_title = utils.sanitizeFilenameComponent(page_title)
+        local safe_title = utils.titleFilenameComponent(page_title)
         local title_filename = safe_title .. ".html"
         local target_path = cache_dir .. "/" .. title_filename
 
@@ -1799,7 +1813,7 @@ function utils.saveSanitizedLink(link, builder, on_complete)
             
             local page_title = content:match([[<title[^>]*>(.-)</title>]])
             if page_title then
-                page_title = util.htmlToPlainTextIfHtml(page_title)
+                page_title = util.htmlToPlainText(page_title)
             end
             
             local title_for_filename = page_title
@@ -1809,7 +1823,7 @@ function utils.saveSanitizedLink(link, builder, on_complete)
             
             title_for_filename = title_for_filename:gsub("^%s+", ""):gsub("%s+$", "")
             
-            local safe_title = utils.sanitizeFilenameComponent(title_for_filename)
+            local safe_title = utils.titleFilenameComponent(title_for_filename)
             local title_filename = safe_title .. ".html"
             
             if page_title then
