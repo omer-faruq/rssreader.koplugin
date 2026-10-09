@@ -45,6 +45,15 @@ return {
                 default_folder = nil,
             },
         },
+        {
+            name = "My Feedbin",
+            type = "feedbin",
+            active = false,
+            auth = {
+                username = "you@example.com", -- your Feedbin login email
+                password = "your_feedbin_password",
+            },
+        },
         {  
             name = "My FreshRSS",  
             type = "freshrss",  

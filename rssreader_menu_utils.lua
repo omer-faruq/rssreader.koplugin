@@ -292,6 +292,7 @@ utils.ALL_UNREAD_FEED_IDS = {
     freshrss = "freshrss_all",
     fever = "fever_all_unread",
     miniflux = "__miniflux_all_unread__",
+    feedbin = "__feedbin_all_unread__",
 }
 
 function utils.getStartTarget()
