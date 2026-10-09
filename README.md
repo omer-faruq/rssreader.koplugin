@@ -18,6 +18,7 @@ The plugin supports several account types:
 - **CommaFeed**: Self-hosted or cloud-based RSS aggregator (**Recommended**)
 - **FreshRSS**: Self-hosted RSS aggregator
 - **Miniflux**: Self-hosted minimalist RSS aggregator with native API support
+- **Feedbin**: Hosted RSS service at [feedbin.com](https://feedbin.com), signed in with your Feedbin email and password
 - **Fever API**: Generic API compatible with other services
 
 ### Why CommaFeed is Recommended
@@ -30,11 +31,11 @@ CommaFeed offers the most comprehensive feature set for RSS reading on KOReader:
 - ✅ **Starring** – Star/unstar articles, synced through CommaFeed's API
 - ✅ **Tags** – Browse articles by tag and edit a story's tags directly, synced through CommaFeed's API
 
-Other services like NewsBlur, FreshRSS, and Miniflux are fully supported with similar features. FreshRSS additionally supports favourites (starring). Miniflux provides native API support with folder/category organization and mark as read functionality.
+Other services like NewsBlur, FreshRSS, and Miniflux are fully supported with similar features. FreshRSS and Feedbin additionally support starring. Miniflux provides native API support with folder/category organization and mark as read functionality.
 
 ## Files You Need to Edit
 - **`rssreader_configuration.sample.lua` → rename to `rssreader_configuration.lua`**: Describe your accounts and per-account preferences.
-  - Provide the name, service type (`local`, `newsblur`, `commafeed`, `freshrss`, `miniflux`, `fever`), login details, and options.
+  - Provide the name, service type (`local`, `newsblur`, `commafeed`, `freshrss`, `miniflux`, `feedbin`, `fever`), login details, and options.
   - Add as many entries as you like, even multiple accounts for the same service type.
   - Use the `active` field to temporarily disable or re-enable an account.
   - After editing, reload the plugin inside KOReader to see your changes in the account list.
@@ -68,7 +69,7 @@ By default RSS Reader opens on the account list. You can make it open directly o
 - Coming back from an opened article still returns you to the list you were reading from, not to the startup feed
 
 ## Virtual "All Feeds" Aggregated Views
-NewsBlur, CommaFeed, Miniflux, and Fever API accounts include special virtual feeds that aggregate stories from all your subscriptions:
+NewsBlur, CommaFeed, Miniflux, Feedbin, and Fever API accounts include special virtual feeds that aggregate stories from all your subscriptions:
 - **★ All Feeds** – View all stories from all subscribed feeds in a single chronological list
 - **★ All Unread** – View only unread stories from all feeds combined
 - Stories are prefixed with their feed name (max 5 characters) for easy identification
@@ -79,6 +80,7 @@ NewsBlur, CommaFeed, Miniflux, and Fever API accounts include special virtual fe
 - **NewsBlur**: Virtual feeds appear at the top of the root feed list (requires premium subscription for full access)
 - **CommaFeed**: Virtual feeds appear at the top of both the root feed list and inside each category/folder
 - **Miniflux**: Virtual feeds appear at the top of both the root feed list and inside each category/folder
+- **Feedbin**: Virtual feeds (★ All Feeds, ★ All Unread, ★ Starred) appear at the top of the root feed list only, since Feedbin cannot list stories by tag. Feedbin tags show up as folders, and a feed with several tags appears in each of them. Feedbin has no unread-count endpoint, so the plugin remembers which feed each unread story belongs to and looks up at most 100 new stories each time the account opens (stories you browse are remembered too). Until it has caught up, counts are a lower bound and show as e.g. **(12+)**; with a large unread backlog that takes a few opens
 - **Fever API**: Only virtual feeds are supported (★ All Feeds, ★ All Unread). Individual feeds and folders are not shown due to API limitations.
 
 ### Settings
@@ -90,14 +92,15 @@ NewsBlur, CommaFeed, Miniflux, and Fever API accounts include special virtual fe
 - **CommaFeed & Miniflux**: Virtual feeds support "Mark all as read" functionality. Long-press a virtual feed to mark all stories in that view as read.
 - **Fever API**: Long-press a virtual feed → **Mark all as read**. After a confirmation, every subscribed feed is marked as read one by one, so this can take a while with many subscriptions.
 - **FreshRSS**: Long-press **All Unread** or **Starred** → **Mark all as read**. *Today (Unread)* cannot be marked as read in bulk.
+- **Feedbin**: Long-press a virtual feed → **Mark all as read**. After a confirmation, **★ All Feeds** and **★ All Unread** mark every unread story in the account read, and **★ Starred** marks your unread starred stories read.
 - **NewsBlur**: Virtual feeds cannot be marked as read in bulk. Use individual feeds for "Mark all as read" functionality.
 
-## Starring Articles (CommaFeed, FreshRSS)
-CommaFeed and FreshRSS accounts support starring/unstarring individual articles, synced through their APIs (FreshRSS calls them favourites and keeps them as the `user/-/state/com.google/starred` tag):
+## Starring Articles (CommaFeed, FreshRSS, Feedbin)
+CommaFeed, FreshRSS and Feedbin accounts support starring/unstarring individual articles, synced through their APIs (FreshRSS calls them favourites and keeps them as the `user/-/state/com.google/starred` tag):
 - Long-press a story → **Star** / **Unstar** (next to **Add to List**), or use the star button in the story preview toolbar
 - Starred stories show a ★ prefix in the title
-- A starred virtual feed aggregates every starred article across your subscriptions: **★ Starred** at the top of the root feed list on CommaFeed, **Starred** among the special feeds on FreshRSS
-- On FreshRSS that feed also lists articles you have already read, since a favourite stays a favourite after reading; the other FreshRSS special feeds stay filtered to unread
+- A starred virtual feed aggregates every starred article across your subscriptions: **★ Starred** at the top of the root feed list on CommaFeed and Feedbin, **Starred** among the special feeds on FreshRSS
+- On FreshRSS and Feedbin that feed also lists articles you have already read, since a favourite stays a favourite after reading; the other FreshRSS special feeds stay filtered to unread
 - Not yet available for NewsBlur, Miniflux, or Fever API accounts
 
 ## Tags (CommaFeed)
@@ -107,7 +110,7 @@ CommaFeed accounts support browsing and editing per-article tags:
 - Long-press **★ Tags** → **Refresh tags** to force a re-fetch; the tag list is also refreshed automatically whenever you re-enter the account from the account list
 - Long-press a story → **Edit Tags** to set its tags as a comma-separated list (this replaces the story's existing tags)
 - A story's current tags, if any, are shown in its long-press popup
-- Not yet available for NewsBlur, FreshRSS, Miniflux, or Fever API accounts
+- Not yet available for NewsBlur, FreshRSS, Miniflux, Feedbin, or Fever API accounts
 
 ## Reading List (Story Queue)
 The plugin includes a temporary reading list that lets you queue stories for later reading or batch saving:
@@ -207,7 +210,7 @@ already downloaded — the feed entry, the article HTML, and the images in the
 asset cache — so richer metadata never costs an extra request.
 
 - **Author(s)** – the entry's own byline (`author`/`creator`, which CommaFeed,
-  Fever, FreshRSS, Miniflux and NewsBlur all provide) on the first line, and the
+  Feedbin, Fever, FreshRSS, Miniflux and NewsBlur all provide) on the first line, and the
   feed title on the second. Entries that omit a byline fall back to the article
   markup (`<meta name="author">`, `article:author`, `rel="author"`,
   `itemprop="author"`); guesses that look like a date, a URL or a sentence are
@@ -235,6 +238,7 @@ asset cache — so richer metadata never costs an extra request.
 ## Content Sanitizers
 Sanitizers fetch and normalize full-page article HTML before it is shown in KOReader. When you open a story the plugin iterates over the active sanitizers in the order configured under `sanitizers` in `rssreader_configuration.lua`. Each sanitizer tries to produce cleaned HTML; if it fails (for example, by returning empty content or hitting an error) the plugin automatically falls back to the next sanitizer in the list, and eventually to the original feed content if none succeed.
 
+- **Feedbin** – `type = "feedbin"`. Uses the full-article extraction Feedbin runs for every entry (Mercury Parser), through a pre-signed link that comes with each story, so it needs **no token and has no quota**. It only applies to stories from a Feedbin account; for any other story it is skipped without a request and the next sanitizer is tried. Like the other sanitizers it ships inactive: set `active = true` on its entry, which has `order = 0` so Feedbin stories try it first; in testing an extraction took about **0.2 s**. Since it counts as a successful sanitize, images follow `download_images_when_sanitize_successful`
 - **Instaparser** – Uses the Instaparser Article API to extract clean article content. Requires an API token from [instaparser.com](https://instaparser.com/). The free tier provides **1,000 requests per month**. Set the token in the sanitizer configuration entry. In measurements over Turkish news and blog feeds it answered in **1.4–4.4 s** (median 2.9 s) and tolerated back-to-back calls without rate limiting, which makes it a good first entry.
 - **Diffbot** – Uses the Diffbot Analyze API to extract article bodies. Diffbot requires a token tied to a work e-mail domain and the free tier currently grants **10,000 credits per month**. Set the token in the sanitizer configuration entry.
   Diffbot extracts server-side and sends nothing until it is finished, so it is considerably slower than Instaparser: measured over the same Turkish feeds it took **3.6–23.4 s** (median 9.1 s) per article. It is also rate-limited far below its credit budget — the free `kgfree` plan allows roughly one call every 10 s and answers `429` with a `Retry-After` — so six back-to-back articles produced one success and five rejections. The plugin honours `Retry-After` once (up to 12 s) before falling through to the next sanitizer.
@@ -280,7 +284,7 @@ The exported OPML file includes:
 - All feeds with their titles and URLs
 - Standard OPML 2.0 format compatible with most RSS readers
 
-**Note**: Only local accounts are included in the export. NewsBlur, CommaFeed, FreshRSS, and Miniflux accounts are managed by their respective services and are not exported.
+**Note**: Only local accounts are included in the export. NewsBlur, CommaFeed, FreshRSS, Miniflux, and Feedbin accounts are managed by their respective services and are not exported.
 
 ## Ready-to-Use Defaults
 - If you need a template, use `rssreader_configuration.sample.lua` and rename it to `rssreader_configuration.lua` after customizing.

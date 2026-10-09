@@ -17,6 +17,7 @@ local HtmlResources = require("rssreader_html_resources")
 local FiveFiltersSanitizer = require("sanitizers/rssreader_sanitizer_fivefilters")
 local DiffbotSanitizer = require("sanitizers/rssreader_sanitizer_diffbot")
 local InstaparserSanitizer = require("sanitizers/rssreader_sanitizer_instaparser")
+local FeedbinSanitizer = require("sanitizers/rssreader_sanitizer_feedbin")
 local SanitizerQuota = require("sanitizers/rssreader_sanitizer_quota")
 local Trapper = require("ui/trapper")
 local sha2 = require("ffi/sha2")
@@ -292,6 +293,7 @@ utils.ALL_UNREAD_FEED_IDS = {
     freshrss = "freshrss_all",
     fever = "fever_all_unread",
     miniflux = "__miniflux_all_unread__",
+    feedbin = "__feedbin_all_unread__",
 }
 
 function utils.getStartTarget()
@@ -822,6 +824,7 @@ local SANITIZER_LABELS = {
     fivefilters_rapidapi = "FiveFilters (RapidAPI)",
     diffbot = "Diffbot",
     instaparser = "Instaparser",
+    feedbin = "Feedbin",
 }
 
 function utils.collectActiveSanitizers(builder)
@@ -957,6 +960,17 @@ function utils.truncateUtf8Bytes(str, max_bytes)
         len = len + clen
     end
     return table.concat(parts)
+end
+
+-- A filename (without extension) from a title: never empty, so a title of
+-- only punctuation does not become a hidden ".html", and capped like
+-- safeFilenameFromStory so a long title stays under the filesystem's limit.
+function utils.titleFilenameComponent(title)
+    local safe_title = utils.truncateUtf8Bytes(utils.sanitizeFilenameComponent(title), 64)
+    if safe_title == "" then
+        return "story"
+    end
+    return safe_title
 end
 
 function utils.safeFilenameFromStory(story)
@@ -1125,10 +1139,20 @@ function utils.fetchStoryContent(story, builder, on_complete, options)
     NetworkMgr:runWhenOnline(function()
         UIManager:nextTick(function()
             local configured_sanitizers = utils.collectActiveSanitizers(builder)
-            if (not configured_sanitizers or #configured_sanitizers == 0) and utils.shouldUseFiveFilters(builder) then
+            -- The feedbin entry only covers Feedbin stories, so it does not
+            -- count as a configured sanitizer here.
+            local has_general_sanitizer = false
+            for _, entry in ipairs(configured_sanitizers or {}) do
+                if entry.type:lower() ~= "feedbin" then
+                    has_general_sanitizer = true
+                    break
+                end
+            end
+            if not has_general_sanitizer and utils.shouldUseFiveFilters(builder) then
                 local fallback_sanitizer = utils.defaultFiveFiltersSanitizer(builder)
                 if fallback_sanitizer then
-                    configured_sanitizers = { fallback_sanitizer }
+                    configured_sanitizers = configured_sanitizers or {}
+                    table.insert(configured_sanitizers, fallback_sanitizer)
                 end
             end
 
@@ -1401,6 +1425,16 @@ function utils.fetchStoryContent(story, builder, on_complete, options)
                     end
 
                     local sanitizer_type = sanitizer.type and sanitizer.type:lower() or ""
+                    -- Feedbin's extraction only exists for Feedbin stories;
+                    -- skip it silently for everything else.
+                    local feedbin_url
+                    if sanitizer_type == "feedbin" then
+                        feedbin_url = FeedbinSanitizer.extractionUrl(story)
+                        if not feedbin_url then
+                            processSanitizer(index + 1)
+                            return
+                        end
+                    end
                     local sanitizer_label = SANITIZER_LABELS[sanitizer_type] or sanitizer_type
                     if sanitizer_label == "" then sanitizer_label = "?" end
                     showProgress(T(_("Trying sanitizer (%1)…"), sanitizer_label))
@@ -1522,6 +1556,25 @@ function utils.fetchStoryContent(story, builder, on_complete, options)
 
                             finalizeContent(instaparser_html, true)
                         end)
+                    elseif sanitizer_type == "feedbin" then
+                        FeedbinSanitizer.fetchArticle(feedbin_url, function(content, err)
+                            if cancelled then
+                                safeComplete(nil, "cancelled")
+                                return
+                            end
+                            if not content then
+                                processSanitizer(index + 1)
+                                return
+                            end
+
+                            local feedbin_html = FeedbinSanitizer.parseResponse(content)
+                            if not feedbin_html or not FeedbinSanitizer.contentIsMeaningful(feedbin_html) then
+                                processSanitizer(index + 1)
+                                return
+                            end
+
+                            finalizeContent(feedbin_html, true)
+                        end)
                     else
                         logger.info("RSSReader", "Unknown sanitizer type", sanitizer.type)
                         processSanitizer(index + 1)
@@ -1573,14 +1626,17 @@ function utils.downloadStoryToCache(story, builder, on_complete, opts)
         if html_for_epub then
             page_title = html_for_epub:match([[<title[^>]*>(.-)</title>]])
             if page_title then
-                page_title = util.htmlToPlainTextIfHtml(page_title)
+                -- <title> text is always HTML-encoded (wrapHtmlForEpub escapes
+                -- it), so decode it even when it holds no tags; the IfHtml
+                -- variant left "n&#39;t" in titles and filenames.
+                page_title = util.htmlToPlainText(page_title)
             end
         end
         
         if not page_title or page_title == "" then
             page_title = content:match([[<title[^>]*>(.-)</title>]])
             if page_title then
-                page_title = util.htmlToPlainTextIfHtml(page_title)
+                page_title = util.htmlToPlainText(page_title)
             end
         end
         
@@ -1590,7 +1646,7 @@ function utils.downloadStoryToCache(story, builder, on_complete, opts)
         
         page_title = page_title:gsub("^%s+", ""):gsub("%s+$", "")
         
-        local safe_title = utils.sanitizeFilenameComponent(page_title)
+        local safe_title = utils.titleFilenameComponent(page_title)
         local title_filename = safe_title .. ".html"
         local target_path = cache_dir .. "/" .. title_filename
 
@@ -1757,7 +1813,7 @@ function utils.saveSanitizedLink(link, builder, on_complete)
             
             local page_title = content:match([[<title[^>]*>(.-)</title>]])
             if page_title then
-                page_title = util.htmlToPlainTextIfHtml(page_title)
+                page_title = util.htmlToPlainText(page_title)
             end
             
             local title_for_filename = page_title
@@ -1767,7 +1823,7 @@ function utils.saveSanitizedLink(link, builder, on_complete)
             
             title_for_filename = title_for_filename:gsub("^%s+", ""):gsub("%s+$", "")
             
-            local safe_title = utils.sanitizeFilenameComponent(title_for_filename)
+            local safe_title = utils.titleFilenameComponent(title_for_filename)
             local title_filename = safe_title .. ".html"
             
             if page_title then

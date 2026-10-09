@@ -1,6 +1,7 @@
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local Dispatcher = require("dispatcher")
 local UIManager = require("ui/uimanager")
+local NetworkMgr = require("ui/network/manager")
 local Menu = require("ui/widget/menu")
 local InfoMessage = require("ui/widget/infomessage")
 local Button = require("ui/widget/button")
@@ -20,6 +21,7 @@ local Input = Device.input
 local Accounts = require("rssreader_accounts")
 local MenuBuilder = require("rssreader_menu")
 local backends = require("rssreader_menu_backends")
+local utils = require("rssreader_menu_utils")
 
 -- Optional: adds the ways back to the feed list from an article opened as a
 -- document. Loaded defensively so a problem in there can never keep the plugin
@@ -297,6 +299,37 @@ function RSSReader:restoreNavigationState(state)
     return true
 end
 
+-- A feed list rebuilt on the way back from an article has nothing above it,
+-- so Back would skip its folders and land on the account list. Put the way up
+-- in the history instead: the account list, then a step that opens the
+-- account's tree and the folders down to this feed. That step fetches the
+-- tree only if Back is actually pressed, so the return itself stays instant.
+function RSSReader:pushTreeReturnPath(builder, account, client, feed_id, show_node)
+    if #self.history > 0 or not self.root_reopen or feed_id == nil then
+        return
+    end
+    local root_reopen = self.root_reopen
+    table.insert(self.history, root_reopen)
+    table.insert(self.history, function()
+        NetworkMgr:runWhenOnline(function()
+            local ok, tree = client:buildTree()
+            if not ok or type(tree) ~= "table" then
+                -- Nothing is on screen at this point; the account list is
+                -- the next best place.
+                root_reopen()
+                return
+            end
+            show_node(builder, account, client, tree)
+            local path = utils.findTreePath(tree, { kind = "feed", id = tostring(feed_id) }) or {}
+            for i = 1, #path - 1 do
+                if path[i].kind == "folder" then
+                    show_node(builder, account, client, path[i])
+                end
+            end
+        end)
+    end)
+end
+
 function RSSReader:restoreFeedState(account, feed_state)
     local builder = MenuBuilder:new{ accounts = self.accounts, reader = self }
 
@@ -310,6 +343,8 @@ function RSSReader:restoreFeedState(account, feed_state)
         self:restoreFeverFeed(builder, account, feed_state)
     elseif account.type == "miniflux" then
         self:restoreMinifluxFeed(builder, account, feed_state)
+    elseif account.type == "feedbin" then
+        self:restoreFeedbinFeed(builder, account, feed_state)
     elseif account.type == "local" then
         self:restoreLocalFeed(builder, account, feed_state)
     end
@@ -350,6 +385,7 @@ function RSSReader:restoreFreshRSSFeed(builder, account, feed_state)
     end  
   
     -- Show the restored feed  
+    self:pushTreeReturnPath(builder, account, client, feed_node.id, backends.showFreshRSSNode)
     backends.showFreshRSSFeed(builder, account, client, feed_node, { reuse = true, menu_page = feed_state.menu_page })  
 end
 
@@ -419,7 +455,45 @@ function RSSReader:restoreMinifluxFeed(builder, account, feed_state)
     end  
   
     -- Show the restored feed  
+    self:pushTreeReturnPath(builder, account, client, feed_node.id, backends.showMinifluxNode)
     backends.showMinifluxFeed(builder, account, client, feed_node, { reuse = true, menu_page = feed_state.menu_page })  
+end
+
+function RSSReader:restoreFeedbinFeed(builder, account, feed_state)
+    if not self.accounts or type(self.accounts.getFeedbinClient) ~= "function" then
+        return
+    end
+
+    local client, err = self.accounts:getFeedbinClient(account)
+    if not client then
+        return
+    end
+
+    -- Create a mock feed node with restored state
+    local feed_node = {
+        kind = "feed",
+        id = feed_state.feed_id,
+        title = feed_state.feed_title,
+        _account_name = feed_state.account_name,
+        _rss_stories = feed_state.stories,
+        _rss_story_keys = {},
+        _rss_page = feed_state.current_page,
+        _rss_has_more = feed_state.has_more,
+        _rss_menu_page = feed_state.menu_page,
+        feed = { unreadCount = 0 }
+    }
+
+    -- Rebuild story keys
+    for _, story in ipairs(feed_state.stories or {}) do
+        local key = story.story_hash or story.hash or story.guid or story.story_id or story.id
+        if key then
+            feed_node._rss_story_keys[key] = true
+        end
+    end
+
+    -- Show the restored feed
+    self:pushTreeReturnPath(builder, account, client, feed_node.id, backends.showFeedbinNode)
+    backends.showFeedbinFeed(builder, account, client, feed_node, { reuse = true, menu_page = feed_state.menu_page })
 end
 
 function RSSReader:restoreLocalFeed(builder, account, feed_state)
@@ -524,6 +598,7 @@ function RSSReader:restoreNewsBlurFeed(builder, account, feed_state)
     end
 
     -- Show the restored feed
+    self:pushTreeReturnPath(builder, account, client, feed_node.id, backends.showNewsBlurNode)
     backends.showNewsBlurFeed(builder, account, client, feed_node, { reuse = true, menu_page = feed_state.menu_page })
 end
 
@@ -557,6 +632,7 @@ function RSSReader:restoreCommaFeedFeed(builder, account, feed_state)
     end
 
     -- Show the restored feed
+    self:pushTreeReturnPath(builder, account, client, feed_node.id, backends.showCommaFeedNode)
     backends.showCommaFeedFeed(builder, account, client, feed_node, { reuse = true, menu_page = feed_state.menu_page })
 end
 
@@ -834,9 +910,15 @@ function RSSReader:onMenuClosed(menu_instance)
             self.history = {}
         end
     end
-    -- close_callback only fires on the user's Close (X), which leaves the RSS
-    -- list at whatever level it was, not just at root.
-    if not self.closing_for_navigation then
+    -- The user's Close (X) leaves the RSS list at whatever level it was, not
+    -- just at root. But Menu also calls close_callback after every item tap,
+    -- once the item's callback has run: by then that callback may already
+    -- have shown the next menu in this one's place (tapping an account opens
+    -- its tree), and the list is still up -- leaving the article then closed
+    -- it from under the list.
+    local list_still_up = self.current_menu_info and self.current_menu_info.menu
+        and UIManager:isWidgetShown(self.current_menu_info.menu)
+    if not self.closing_for_navigation and not list_still_up then
         self:leaveArticleUnderneath()
     end
 end

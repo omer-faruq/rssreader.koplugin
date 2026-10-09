@@ -25,6 +25,7 @@ function Accounts:new()
         freshrss_clients = {},
         fever_clients = {},
         miniflux_clients = {},
+        feedbin_clients = {},
     }
     setmetatable(instance, self)
     return instance
@@ -127,6 +128,23 @@ function Accounts:getMinifluxClient(account)
     local Miniflux = require("rssreader_miniflux")
     local client = Miniflux:new(account)
     self.miniflux_clients[account.name] = client
+    return client
+end
+
+function Accounts:getFeedbinClient(account)
+    if not account or account.type ~= "feedbin" then
+        return nil, "Account is not a Feedbin account"
+    end
+    if not account.name then
+        return nil, "Feedbin account is missing a name"
+    end
+    if self.feedbin_clients[account.name] then
+        return self.feedbin_clients[account.name]
+    end
+
+    local Feedbin = require("rssreader_feedbin")
+    local client = Feedbin:new(account)
+    self.feedbin_clients[account.name] = client
     return client
 end
 

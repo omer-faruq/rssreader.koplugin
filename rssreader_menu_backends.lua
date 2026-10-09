@@ -460,6 +460,49 @@ function backends.performMarkAllAsReadForFreshRSSSpecial(self, account, client, 
     UIManager:show(dialog)
 end
 
+-- Feedbin's virtual feeds are cleared with one batch of entry IDs each:
+-- every unread entry for All Feeds / All Unread, the unread starred ones for
+-- Starred.
+function backends.performMarkAllAsReadForFeedbinVirtual(self, account, client, virtual_node, on_done)
+    local dialog
+    dialog = ButtonDialog:new{
+        title = string.format(_("Mark all stories in '%s' as read?"), virtual_node.title or _("Feed")),
+        buttons = {{
+            {
+                text = _("Cancel"),
+                background = Blitbuffer.COLOR_WHITE,
+                callback = function()
+                    UIManager:close(dialog)
+                end,
+            },
+            {
+                text = _("Mark all as read"),
+                background = Blitbuffer.COLOR_WHITE,
+                callback = function()
+                    UIManager:close(dialog)
+                    NetworkMgr:runWhenOnline(function()
+                        local ok, err
+                        if virtual_node.id == client.STARRED_ID then
+                            ok, err = client:markStarredAsRead()
+                        else
+                            ok, err = client:markAllAsRead()
+                        end
+                        UIManager:show(InfoMessage:new{
+                            text = ok and string.format(_("Marked feed '%s' as read."), virtual_node.title or _("Feed"))
+                                or string.format(_("Failed to mark feed as read: %s"), err or _("Unknown error")),
+                            timeout = 3,
+                        })
+                        if ok and on_done then
+                            on_done()
+                        end
+                    end)
+                end,
+            },
+        }},
+    }
+    UIManager:show(dialog)
+end
+
 function backends.showNewsBlurAccount(self, account, opts)
     opts = opts or {}
     if not self.accounts or type(self.accounts.getNewsBlurClient) ~= "function" then
@@ -2048,6 +2091,261 @@ function backends.showMinifluxFeed(self, account, client, feed_node, opts)
             utils.trackMenuPage(menu_instance, feed_node)
             self:showMenu(menu_instance, function()
                 backends.showMinifluxFeed(self, account, client, feed_node, { reuse = true })
+            end)
+        end
+
+        if menu_instance then
+            context.menu_instance = menu_instance
+            -- For RSSReader:openAdjacentArticle, which finds them on a restored list.
+            menu_instance._rss_story_context = context
+            menu_instance._rss_builder = self
+            menu_instance._rss_feed_node = feed_node
+            menu_instance.onMenuHold = utils.triggerHoldCallback
+            utils.ensureMenuCloseHook(menu_instance)
+            utils.trackMenuPage(menu_instance, feed_node)
+        end
+    end
+
+    if reuse_cached_stories and #feed_node._rss_stories > 0 then
+        finalizeMenu()
+        return
+    end
+
+    NetworkMgr:runWhenOnline(function()
+        local fetch_options = {
+            page = fetch_page or 1,
+        }
+
+        local ok, data = client:fetchStories(feed_node.id, fetch_options)
+        if not ok then
+            UIManager:show(InfoMessage:new{
+                text = data or _("Failed to fetch stories."),
+            })
+            return
+        end
+
+        local stories = data.stories or {}
+        feed_node._rss_stories = stories
+        feed_node._rss_story_keys = {}
+        for _, story in ipairs(stories) do
+            local key = story.story_hash or story.hash or story.guid or story.story_id or story.id
+            if key then
+                feed_node._rss_story_keys[key] = true
+            end
+        end
+        feed_node._rss_page = fetch_page or 1
+        feed_node._rss_has_more = data.more_stories or false
+
+        finalizeMenu()
+    end)
+end
+
+function backends.showFeedbinAccount(self, account, opts)
+    opts = opts or {}
+    if not self.accounts or type(self.accounts.getFeedbinClient) ~= "function" then
+        UIManager:show(InfoMessage:new{
+            text = _("Feedbin integration is not available."),
+        })
+        return
+    end
+
+    local client, err = self.accounts:getFeedbinClient(account)
+    if not client then
+        UIManager:show(InfoMessage:new{
+            text = err or _("Unable to open Feedbin account."),
+        })
+        return
+    end
+
+    if not opts.force_refresh and client.tree_cache then
+        backends.showFeedbinNode(self, account, client, client.tree_cache)
+        return
+    end
+
+    NetworkMgr:runWhenOnline(function()
+        local ok, tree_or_err = client:buildTree()
+        if not ok then
+            UIManager:show(InfoMessage:new{
+                text = tree_or_err or _("Failed to load Feedbin subscriptions."),
+            })
+            return
+        end
+
+        showFetchedTree(self, account, client, tree_or_err, opts, backends.showFeedbinNode, backends.showFeedbinFeed)
+    end)
+end
+
+function backends.showFeedbinNode(self, account, client, node, opts)
+    local children = node and node.children or {}
+    local entries = {}
+    for _, child in ipairs(children) do
+        if child.kind == "folder" then
+            local normal_callback = function()
+                backends.showFeedbinNode(self, account, client, child)
+            end
+            table.insert(entries, {
+                text = child.title or _("Untitled folder"),
+                callback = normal_callback,
+                hold_callback = function()
+                    self:createLongPressMenuForFolder(account, client, child, normal_callback)
+                end,
+                hold_keep_menu_open = true,
+            })
+        elseif child.kind == "feed" then
+            local normal_callback = function()
+                backends.showFeedbinFeed(self, account, client, child)
+            end
+            local unread_count = 0
+            if child.feed then
+                unread_count = child.feed.unreadCount or 0
+            end
+            local display_title = child.title or _("Untitled feed")
+            if unread_count > 0 then
+                -- Counts stop at a cap; the partial flag marks them "N+".
+                local suffix = child.feed.unreadCountPartial and "+" or ""
+                display_title = display_title .. " (" .. tostring(unread_count) .. suffix .. ")"
+            end
+            table.insert(entries, {
+                text = display_title,
+                callback = normal_callback,
+                hold_callback = function()
+                    self:createLongPressMenuForNode(account, client, child, normal_callback)
+                end,
+                hold_keep_menu_open = true,
+            })
+        end
+    end
+
+    if #entries == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("No feeds available."),
+        })
+        return
+    end
+
+    local function refresh(this)
+        backends.showFeedbinAccount(self, account, { force_refresh = true, focus = node, replace = this })
+    end
+    local menu_instance = utils.newRefreshableMenu({
+        title = node and node.title or (account and account.name) or _("Feedbin"),
+        item_table = entries,
+        onMenuHold = utils.triggerHoldCallback,
+    }, refresh, self:markAllAsReadAction(account, client, node, refresh))
+    self:showMenu(menu_instance, function()
+        reopenTreeNode(self, account, client, node, backends.showFeedbinAccount, backends.showFeedbinNode)
+    end, { replace = opts and opts.replace })
+
+    if menu_instance then
+        menu_instance.onMenuHold = utils.triggerHoldCallback
+    end
+end
+
+function backends.showFeedbinFeed(self, account, client, feed_node, opts)
+    opts = opts or {}
+    local reuse_cached_stories = opts.reuse and true or false
+    feed_node._rss_stories = feed_node._rss_stories or {}
+    feed_node._rss_story_keys = feed_node._rss_story_keys or {}
+    feed_node._rss_page = feed_node._rss_page or 0
+    feed_node._account_name = account.name
+    feed_node._rss_reader = self.reader
+
+    if self.reader and type(self.reader.getFeedState) == "function" then
+        local stored_state = self.reader:getFeedState(account.name, feed_node.id)
+        if stored_state then
+            if type(stored_state.stories) == "table" and #stored_state.stories > 0 then
+                feed_node._rss_stories = util.tableDeepCopy(stored_state.stories)
+                feed_node._rss_story_keys = util.tableDeepCopy(stored_state.story_keys or {})
+                feed_node._rss_page = stored_state.current_page or feed_node._rss_page
+                feed_node._rss_has_more = stored_state.has_more or feed_node._rss_has_more
+            end
+            if type(stored_state.menu_page) == "number" then
+                feed_node._rss_menu_page = feed_node._rss_menu_page or stored_state.menu_page
+                if not opts.menu_page then
+                    opts.menu_page = stored_state.menu_page
+                end
+            end
+        end
+    end
+
+    local fetch_page
+    if opts.page then
+        fetch_page = opts.page
+    elseif not reuse_cached_stories then
+        fetch_page = 1
+    end
+
+    local function finalizeMenu()
+        local stories = feed_node._rss_stories or {}
+        if #stories == 0 then
+            UIManager:show(InfoMessage:new{
+                text = _("No stories available."),
+            })
+            return
+        end
+
+        local context = {
+            feed_type = "feedbin",
+            account = account,
+            client = client,
+            feed_node = feed_node,
+            feed_id = feed_node.id,
+            refresh = function()
+                backends.showFeedbinFeed(self, account, client, feed_node, { reuse = true })
+            end,
+            force_refresh_on_close = false,
+        }
+
+        local view_mode = "compact"
+        if self.reader and type(self.reader.getListViewMode) == "function" then
+            view_mode = self.reader:getListViewMode()
+        end
+
+        local entries = {}
+        for index, story in ipairs(stories) do
+            utils.normalizeStoryLink(story)
+            table.insert(entries, {
+                text = utils.buildStoryEntryText(story, true, view_mode),
+                bold = utils.isUnread(story),
+                callback = self:createTapCallback(stories, index, context),
+                hold_callback = function()
+                    self:createStoryLongPressMenu(stories, index, context, function()
+                        self:showStory(stories, index, function(action, payload)
+                            self:handleStoryAction(stories, index, action, payload, context)
+                        end, nil, { disable_story_mutators = true }, context)
+                    end)
+                end,
+                hold_keep_menu_open = true,
+            })
+        end
+
+        local current_menu = self.reader and self.reader.current_menu_info and self.reader.current_menu_info.menu
+        local menu_instance
+        if current_menu and current_menu._rss_feed_node == feed_node then
+            menu_instance = current_menu
+            if menu_instance.setTitle then
+                menu_instance:setTitle(feed_node.title or (account and account.name) or _("Feedbin"))
+            end
+            if menu_instance.switchItemTable then
+                menu_instance:switchItemTable(nil, entries)
+            end
+            menu_instance.onMenuHold = utils.triggerHoldCallback
+        else
+            menu_instance = utils.newRefreshableMenu({
+                title = feed_node.title or (account and account.name) or _("Feedbin"),
+                item_table = entries,
+                multilines_forced = true,
+                items_max_lines = view_mode == "magazine" and 5 or nil,
+            }, function()
+                -- Not reusing the cache fetches page 1 again; the current
+                -- menu is updated in place since it shows this feed_node.
+                backends.showFeedbinFeed(self, account, client, feed_node, { menu_page = 1 })
+            end, self:storyListMarkAllAction(account, client, feed_node, context))
+            menu_instance._rss_feed_node = feed_node
+            menu_instance.onMenuHold = utils.triggerHoldCallback
+            utils.ensureMenuCloseHook(menu_instance)
+            utils.trackMenuPage(menu_instance, feed_node)
+            self:showMenu(menu_instance, function()
+                backends.showFeedbinFeed(self, account, client, feed_node, { reuse = true })
             end)
         end
 

@@ -117,7 +117,7 @@ function MenuBuilder:showStory(stories, index, on_action, on_close, options, con
         end
     end
     local is_api_context = false
-    if context and (context.feed_type == "newsblur" or context.feed_type == "commafeed" or context.feed_type == "freshrss" or context.feed_type == "fever" or context.feed_type == "miniflux") then
+    if context and (context.feed_type == "newsblur" or context.feed_type == "commafeed" or context.feed_type == "freshrss" or context.feed_type == "fever" or context.feed_type == "miniflux" or context.feed_type == "feedbin") then
         is_api_context = true
     end
 
@@ -557,7 +557,8 @@ function MenuBuilder:createLongPressMenuForNode(account, client, node, normal_ca
     end
 
     local account_type = account and account.type
-    if account_type ~= "newsblur" and account_type ~= "commafeed" and account_type ~= "fever" and account_type ~= "freshrss" and account_type ~= "miniflux" then
+    if account_type ~= "newsblur" and account_type ~= "commafeed" and account_type ~= "fever" and account_type ~= "freshrss" and account_type ~= "miniflux"
+            and account_type ~= "feedbin" then
         return
     end
 
@@ -603,7 +604,8 @@ function MenuBuilder:createLongPressMenuForFolder(account, client, node, normal_
     end
 
     local account_type = account and account.type
-    if account_type ~= "newsblur" and account_type ~= "commafeed" and account_type ~= "fever" and account_type ~= "freshrss" and account_type ~= "miniflux" then
+    if account_type ~= "newsblur" and account_type ~= "commafeed" and account_type ~= "fever" and account_type ~= "freshrss" and account_type ~= "miniflux"
+            and account_type ~= "feedbin" then
         return
     end
 
@@ -1235,6 +1237,30 @@ function MenuBuilder:performMarkAllAsReadForAccount(account, on_done)
         end)
         return
     end
+    if account_type == "feedbin" then
+        -- One batch of every unread entry ID covers every subscription.
+        local client = self.accounts and type(self.accounts.getFeedbinClient) == "function"
+            and self.accounts:getFeedbinClient(account)
+        if not client then
+            UIManager:show(InfoMessage:new{
+                text = _("Unable to access account."),
+                timeout = 3,
+            })
+            return
+        end
+        NetworkMgr:runWhenOnline(function()
+            local ok, err = client:markAllAsRead()
+            UIManager:show(InfoMessage:new{
+                text = ok and string.format(_("Marked account '%s' as read."), account.name or _("Account"))
+                    or string.format(_("Failed to mark account as read: %s"), err or _("Unknown error")),
+                timeout = 3,
+            })
+            if ok and on_done then
+                on_done()
+            end
+        end)
+        return
+    end
     if account_type ~= "newsblur" and account_type ~= "commafeed" then
         UIManager:show(InfoMessage:new{
             text = _("Account type not supported."),
@@ -1340,7 +1366,8 @@ function MenuBuilder:markAllAsReadAction(account, client, node, on_done)
             -- CommaFeed tags: the virtual-feed path would mark every feed.
             return nil
         elseif (node._virtual or node.is_virtual)
-                and account_type ~= "commafeed" and account_type ~= "fever" and account_type ~= "miniflux" then
+                and account_type ~= "commafeed" and account_type ~= "fever" and account_type ~= "miniflux"
+                and account_type ~= "feedbin" then
             return nil
         end
         -- Like the feed's long-press action: no confirmation for one feed.
@@ -1348,8 +1375,8 @@ function MenuBuilder:markAllAsReadAction(account, client, node, on_done)
     elseif node.kind == "folder" then
         run = function(done) self:showMarkAllAsReadDialog(account, client, node, done) end
     elseif node.kind == "root" then
-        if account_type == "freshrss" then
-            -- One reading-list call instead of one per feed.
+        if account_type == "freshrss" or account_type == "feedbin" then
+            -- One call for the whole account instead of one per feed.
             run = function(done) self:showMarkAllAsReadDialogForAccount(account, done) end
         else
             run = function(done) self:showMarkAllAsReadDialog(account, client, node, done) end
@@ -1431,6 +1458,9 @@ function MenuBuilder:performMarkAllAsRead(account, client, node, on_done)
             elseif account_type == "miniflux" then
                 backends.performMarkAllAsReadForMinifluxVirtual(self, account, client, node, on_done)
                 return
+            elseif account_type == "feedbin" then
+                backends.performMarkAllAsReadForFeedbinVirtual(self, account, client, node, on_done)
+                return
             end
             
             UIManager:show(InfoMessage:new{
@@ -1484,6 +1514,8 @@ function MenuBuilder:performMarkAllAsRead(account, client, node, on_done)
             elseif account_type == "commafeed" and client.markCategoryAsRead then
                 success, error_msg = client:markCategoryAsRead(node.id)
             elseif account_type == "miniflux" and client.markCategoryAsRead then
+                success, error_msg = client:markCategoryAsRead(node.id)
+            elseif account_type == "feedbin" and client.markCategoryAsRead then
                 success, error_msg = client:markCategoryAsRead(node.id)
             elseif account_type == "freshrss" and client.markCategoryAsRead then
                 success, error_msg = client:markCategoryAsRead(node.id)
@@ -1903,7 +1935,8 @@ function MenuBuilder:buildAccountEntries(accounts, open_callback)
         end
         
         -- Add Mark all as read for API accounts
-        if account.type == "newsblur" or account.type == "commafeed" or account.type == "freshrss" or account.type == "miniflux" then
+        if account.type == "newsblur" or account.type == "commafeed" or account.type == "freshrss" or account.type == "miniflux"
+                or account.type == "feedbin" then
             table.insert(holds_items, {
                 text = _("Mark all as read"),
                 background = Blitbuffer.COLOR_WHITE,
@@ -2458,6 +2491,9 @@ function MenuBuilder:openAccount(reader, account, opts)
         return
     elseif account_type == "miniflux" then
         backends.showMinifluxAccount(self, account, { force_refresh = true, start_target = start_target })
+        return
+    elseif account_type == "feedbin" then
+        backends.showFeedbinAccount(self, account, { force_refresh = true, start_target = start_target })
         return
     end
 
