@@ -129,6 +129,7 @@ return {
             type = "instaparser",
             active = false,
             token = "your_instaparser_token", -- get your token here: https://instaparser.com/
+            seconds_between_calls = 2, -- spacing between calls, shared by parallel downloads (Trial plan: max 1 call/s; 0 = no limit)
         },
     },
     features = {

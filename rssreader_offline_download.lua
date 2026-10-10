@@ -20,6 +20,7 @@ local ffiutil = require("ffi/util")
 local T = ffiutil.template
 
 local OfflineStore = require("rssreader_offline_store")
+local RateLimit = require("sanitizers/rssreader_sanitizer_ratelimit")
 local FeedFetcher = require("rssreader_feed_fetcher")
 local utils = require("rssreader_menu_utils")
 
@@ -260,6 +261,7 @@ end
 -- like HtmlResources does with images. A worker only fetches the article
 -- HTML (into <dir>/<index>.html); images and the EPUB stay in this process,
 -- one story at a time, so worker counts never multiply on a small device.
+-- Instaparser calls stay spaced across workers (RateLimit time slots).
 -- Diffbot and FiveFilters-RapidAPI never run in workers
 -- (utils.workerSafeSanitizers): a story that needs them is left without a
 -- file, and the sequential pass runs the whole chain for it as before.
@@ -351,9 +353,13 @@ function OfflineDownload.prefetchArticles(builder, stories, is_cancelled, on_pro
         table.insert(buckets[(index - 1) % worker_count + 1], { index = index, story = story })
     end
 
+    -- Rate-limited sanitizers (Instaparser) take turns by the clock: worker k
+    -- only calls in its own slots, starting after this process's last call.
+    local slot_start = RateLimit.nextFreeTime()
     local pids = {}
-    for _i, bucket in ipairs(buckets) do
+    for bucket_index, bucket in ipairs(buckets) do
         local pid = ffiutil.runInSubProcess(function()
+            RateLimit.useTimeSlots(slot_start, worker_count, bucket_index - 1)
             for _j, task in ipairs(bucket) do
                 utils.fetchStoryContent(task.story, builder, function(content)
                     if type(content) ~= "string" or content == "" then
@@ -390,6 +396,7 @@ function OfflineDownload.prefetchArticles(builder, stories, is_cancelled, on_pro
                 ffiutil.terminateSubProcess(pid)
             end
             reapLater(pids)
+            RateLimit.noteExternalCalls()
             on_done(nil)
             return
         end
@@ -404,6 +411,9 @@ function OfflineDownload.prefetchArticles(builder, stories, is_cancelled, on_pro
             on_progress(done, #stories)
         end
         if #pids == 0 then
+            -- The workers' last calls were just now: the sequential pass
+            -- waits a full interval before its own.
+            RateLimit.noteExternalCalls()
             on_done(dir)
         else
             UIManager:scheduleIn(PREFETCH_POLL_INTERVAL, poll)

@@ -6,10 +6,14 @@ local socketutil = require("socketutil")
 local logger = require("logger")
 
 local SanitizerBase = require("sanitizers/rssreader_sanitizer_base")
+local RateLimit = require("sanitizers/rssreader_sanitizer_ratelimit")
 
 local InstaparserSanitizer = {}
 
 local DEFAULT_ENDPOINT = "https://www.instaparser.com/api/1/article"
+-- The Trial plan allows 1 call per second; 2 s leaves a wide margin while
+-- Offline Mode's workers still fetch in parallel.
+local DEFAULT_SECONDS_BETWEEN_CALLS = 2
 
 function InstaparserSanitizer.fetchArticle(sanitizer, link, on_complete)
     if type(link) ~= "string" or link == "" then
@@ -58,25 +62,38 @@ function InstaparserSanitizer.fetchArticle(sanitizer, link, on_complete)
         return
     end
 
-    local sink = {}
-    -- Keep timeouts modest so a slow sanitizer doesn't stall fetchStoryContent
-    -- for tens of seconds; the original article fetch can still be tried as fallback.
-    socketutil:set_timeout(8, 15)
-    local ok, status_code, _, status_text = http.request{
-        url = endpoint,
-        method = "POST",
-        source = ltn12.source.string(body_str),
-        sink = socketutil.table_sink(sink),
-        headers = {
-            ["Authorization"] = "Bearer " .. token,
-            ["Content-Type"] = "application/json",
-            ["Content-Length"] = tostring(#body_str),
-            ["Accept"] = "application/json",
-            ["Accept-Encoding"] = "identity",
-            ["User-Agent"] = "KOReader RSSReader",
-        },
-    }
-    socketutil:reset_timeout()
+    -- seconds_between_calls in the sanitizer entry overrides it (0 = no limit).
+    local interval = RateLimit.intervalFor(sanitizer, DEFAULT_SECONDS_BETWEEN_CALLS)
+
+    local sink, ok, status_code, _headers, status_text
+    for attempt = 1, 2 do
+        RateLimit.wait("instaparser", interval)
+        sink = {}
+        -- Keep timeouts modest so a slow sanitizer doesn't stall fetchStoryContent
+        -- for tens of seconds; the original article fetch can still be tried as fallback.
+        socketutil:set_timeout(8, 15)
+        ok, status_code, _headers, status_text = http.request{
+            url = endpoint,
+            method = "POST",
+            source = ltn12.source.string(body_str),
+            sink = socketutil.table_sink(sink),
+            headers = {
+                ["Authorization"] = "Bearer " .. token,
+                ["Content-Type"] = "application/json",
+                ["Content-Length"] = tostring(#body_str),
+                ["Accept"] = "application/json",
+                ["Accept-Encoding"] = "identity",
+                ["User-Agent"] = "KOReader RSSReader",
+            },
+        }
+        socketutil:reset_timeout()
+        -- Rate-limited anyway (another device on the same token, say): one
+        -- more try in the next free slot.
+        if tostring(status_code) ~= "429" or attempt == 2 then
+            break
+        end
+        logger.info("RSSReader", "Instaparser rate-limited; retrying in the next slot")
+    end
 
     if not ok or tostring(status_code):sub(1, 1) ~= "2" then
         logger.info("RSSReader", "Instaparser request failed", status_text or status_code)
