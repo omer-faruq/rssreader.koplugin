@@ -465,6 +465,31 @@ function Miniflux:markStoryAsRead(feed_id, story)
     return self:performRequest("PUT", "/v1/entries", payload)
 end
 
+-- Offline Mode's read-state sync: many stories in as few requests as possible.
+function Miniflux:markStoriesAsRead(stories)
+    local ids = {}
+    for _, story in ipairs(stories or {}) do
+        local id = tonumber(story and (story.id or story.story_id))
+        if id then
+            table.insert(ids, id)
+        end
+    end
+    for start = 1, #ids, 100 do
+        local batch = {}
+        for i = start, math.min(start + 99, #ids) do
+            table.insert(batch, ids[i])
+        end
+        local ok, err = self:performRequest("PUT", "/v1/entries", {
+            entry_ids = batch,
+            status = "read",
+        })
+        if not ok then
+            return false, err
+        end
+    end
+    return true
+end
+
 function Miniflux:markStoryAsUnread(feed_id, story)
     local story_id = story and (story.id or story.story_id)
     if not story_id then

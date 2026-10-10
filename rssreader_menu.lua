@@ -1970,6 +1970,13 @@ function MenuBuilder:buildAccountEntries(accounts, open_callback)
             holds = holds_items,
         })
     end
+    local OfflineMenu = require("rssreader_offline_menu")
+    table.insert(entries, {
+        text = OfflineMenu.rowLabel(),
+        callback = function()
+            OfflineMenu.show(self)
+        end,
+    })
     local pool_count = Pool.count()
     local pool_label = pool_count > 0
         and string.format(_("List (%d)"), pool_count)
@@ -2472,6 +2479,26 @@ end
 
 -- opts.start_target: the "Open on startup" setting, see showStartViewPopup.
 function MenuBuilder:openAccount(reader, account, opts)
+    -- Offline Mode (automatic sync): read states from offline reading reach
+    -- the server before the tree loads, so its unread counts are right.
+    if account and account.type ~= "local" and not (opts and opts._offline_synced) then
+        local OfflineSync = require("rssreader_offline_sync")
+        if OfflineSync.shouldSyncBeforeOpen(account.name) then
+            local next_opts = {}
+            for key, value in pairs(opts or {}) do
+                next_opts[key] = value
+            end
+            next_opts._offline_synced = true
+            OfflineSync.autoSync(self, {
+                account = account.name,
+                on_done = function()
+                    self:openAccount(reader, account, next_opts)
+                end,
+            })
+            return
+        end
+    end
+
     local start_target = opts and opts.start_target
     local account_type = account and account.type
     if account_type == "local" then
@@ -3348,43 +3375,7 @@ function MenuBuilder:poolSaveAll()
             end
             util.makePath(directory)
 
-            local filename = utils.safeFilenameFromStory(story)
-            local metadata = type(download_info) == "table" and download_info or {}
-            local include_images = metadata.images_requested and true or false
-            local html_for_epub = metadata.html_for_epub
-            local should_create_epub = include_images and type(html_for_epub) == "string" and html_for_epub ~= ""
-            local assets_root = metadata.assets_root or (metadata.assets and metadata.assets.assets_root)
-            local function cleanupAssets()
-                if assets_root then
-                    HtmlResources.cleanupAssets(assets_root)
-                    assets_root = nil
-                end
-            end
-
-            local saved = false
-            if should_create_epub and utils.EpubDownloadBackend then
-                local base_name = filename:gsub("%.html$", "")
-                local epub_path = utils.buildUniqueTargetPathWithExtension(directory, base_name, "epub")
-                local story_url = metadata.original_url or story.permalink or story.href or story.link or ""
-                local feed_title = story.feed_title or story.feedTitle
-                local local_assets = metadata.local_assets
-                local ok, result_or_err = pcall(function()
-                    return utils.EpubDownloadBackend:createEpub(epub_path, html_for_epub, story_url, include_images, nil, nil, nil, feed_title, local_assets, utils.EpubDownloadBackend:storyMetadata(story))
-                end)
-                saved = ok and result_or_err ~= false
-                if not saved then
-                    logger.warn("RSSReader Pool", "EPUB creation failed", result_or_err)
-                end
-            end
-
-            if not saved then
-                local target_path = utils.buildUniqueTargetPath(directory, filename)
-                local story_url_for_html = metadata.original_url or story.permalink or story.href or story.link or ""
-                saved = utils.writeStoryHtmlFile(content, target_path, utils.resolveStoryDocumentTitle(story), story_url_for_html)
-            end
-
-            cleanupAssets()
-
+            local saved = utils.saveFetchedStory(story, content, download_info, directory, "RSSReader Pool")
             if saved then
                 Pool.removeStory(1)
             end

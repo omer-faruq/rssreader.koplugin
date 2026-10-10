@@ -1218,6 +1218,65 @@ function backends.showCommaFeedFeed(self, account, client, feed_node, opts)
     finalizeMenu()
 end
 
+-- FreshRSS's fixed streams shown above its folders (Today, All Unread,
+-- Starred, and the account's special_feeds). Shared with the Offline Mode
+-- feed picker, which offers the same nodes.
+function backends.freshRSSSpecialChildren(account, client)
+    local children = {}
+
+    table.insert(children, {
+        kind = "feed",
+        id = "freshrss_today_unread",
+        title = _("Today (Unread)"),
+        api_feed_id = "user/-/state/com.google/reading-list",
+        is_special_feed = true,
+        feed = { unreadCount = 0 },
+    })
+
+    table.insert(children, {
+        kind = "feed",
+        id = "freshrss_all",
+        title = _("All Unread"),
+        api_feed_id = "user/-/state/com.google/reading-list",
+        is_special_feed = true,
+        feed = { unreadCount = 0 },
+    })
+
+    table.insert(children, {
+        kind = "feed",
+        id = "freshrss_starred",
+        title = _("Starred"),
+        -- FreshRSS keeps favourites in their own stream.
+        api_feed_id = (type(client.getStarredStreamId) == "function"
+            and client:getStarredStreamId())
+            or "user/-/state/com.google/starred",
+        is_special_feed = true,
+        -- A favourite stays a favourite after it has been read, so this
+        -- is the one special feed that must not be filtered to unread.
+        read_filter_override = "all",
+        feed = { unreadCount = 0 },
+    })
+
+    if account.special_feeds and type(account.special_feeds) == "table" then
+        for _, special_feed in ipairs(account.special_feeds) do
+            if special_feed.id then
+                local internal_id = "freshrss_" .. special_feed.id:gsub("/", "_") .. "_unread"
+
+                table.insert(children, {
+                    kind = "feed",
+                    id = internal_id,
+                    title = special_feed.title or special_feed.id,
+                    api_feed_id = special_feed.id,
+                    is_special_feed = true,
+                    feed = { unreadCount = 0 },
+                })
+            end
+        end
+    end
+
+    return children
+end
+
 function backends.showFreshRSSAccount(self, account, opts)
     opts = opts or {}
     if not self.accounts or type(self.accounts.getFreshRSSClient) ~= "function" then
@@ -1235,67 +1294,11 @@ function backends.showFreshRSSAccount(self, account, opts)
         return
     end
 
-    local function buildSpecialChildren()
-        local children = {}
-
-        table.insert(children, {
-            kind = "feed",
-            id = "freshrss_today_unread",
-            title = _("Today (Unread)"),
-            api_feed_id = "user/-/state/com.google/reading-list",
-            is_special_feed = true,
-            feed = { unreadCount = 0 },
-        })
-
-        table.insert(children, {
-            kind = "feed",
-            id = "freshrss_all",
-            title = _("All Unread"),
-            api_feed_id = "user/-/state/com.google/reading-list",
-            is_special_feed = true,
-            feed = { unreadCount = 0 },
-        })
-
-        table.insert(children, {
-            kind = "feed",
-            id = "freshrss_starred",
-            title = _("Starred"),
-            -- FreshRSS keeps favourites in their own stream.
-            api_feed_id = (type(client.getStarredStreamId) == "function"
-                and client:getStarredStreamId())
-                or "user/-/state/com.google/starred",
-            is_special_feed = true,
-            -- A favourite stays a favourite after it has been read, so this
-            -- is the one special feed that must not be filtered to unread.
-            read_filter_override = "all",
-            feed = { unreadCount = 0 },
-        })
-
-        if account.special_feeds and type(account.special_feeds) == "table" then
-            for _, special_feed in ipairs(account.special_feeds) do
-                if special_feed.id then
-                    local internal_id = "freshrss_" .. special_feed.id:gsub("/", "_") .. "_unread"
-
-                    table.insert(children, {
-                        kind = "feed",
-                        id = internal_id,
-                        title = special_feed.title or special_feed.id,
-                        api_feed_id = special_feed.id,
-                        is_special_feed = true,
-                        feed = { unreadCount = 0 },
-                    })
-                end
-            end
-        end
-
-        return children
-    end
-
     local function showWithTree(tree)
         local base_children = (tree and tree.children) or {}
         local merged_children = {}
 
-        local special_children = buildSpecialChildren()
+        local special_children = backends.freshRSSSpecialChildren(account, client)
         for _, node in ipairs(special_children) do
             table.insert(merged_children, node)
         end

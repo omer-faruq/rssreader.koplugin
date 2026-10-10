@@ -278,7 +278,13 @@ function RSSReader:restoreNavigationState(state)
         builder:showPoolStoryList()
         return true
     end
-    
+
+    local OfflineMenu = require("rssreader_offline_menu")
+    if feed_state.account_name == OfflineMenu.ACCOUNT_NAME then
+        local builder = MenuBuilder:new{ accounts = self.accounts, reader = self }
+        return OfflineMenu.restore(builder, feed_state)
+    end
+
     local accounts = self.accounts:getAccounts()
 
     -- Find matching account
@@ -659,6 +665,57 @@ function RSSReader:onDispatcherRegisterActions()
         title = _("RSS Reader"),
         general = true,
     })
+    Dispatcher:registerAction("rssreader_offline_open", {
+        category = "none",
+        event = "RSSReaderOffline",
+        title = _("RSS Reader: offline list"),
+        general = true,
+    })
+    -- For a gesture or a Profile like "Wi-Fi on → download → Wi-Fi off":
+    -- runs without the dialog, with the values it was last started with.
+    Dispatcher:registerAction("rssreader_offline_download", {
+        category = "none",
+        event = "RSSReaderOfflineDownload",
+        title = _("RSS Reader: download selected feeds"),
+        general = true,
+    })
+    Dispatcher:registerAction("rssreader_offline_sync", {
+        category = "none",
+        event = "RSSReaderOfflineSync",
+        title = _("RSS Reader: sync offline read states"),
+        general = true,
+    })
+end
+
+function RSSReader:onRSSReaderOffline()
+    self:openAccountList({ skip_restore = true })
+    local builder = MenuBuilder:new{ accounts = self.accounts, reader = self }
+    require("rssreader_offline_menu").show(builder)
+end
+
+function RSSReader:onRSSReaderOfflineDownload()
+    local OfflineStore = require("rssreader_offline_store")
+    local builder = MenuBuilder:new{ accounts = self.accounts, reader = self }
+    require("rssreader_offline_download").run(builder, OfflineStore.getSelection(), OfflineStore.getLastRun())
+end
+
+function RSSReader:onRSSReaderOfflineSync()
+    local builder = MenuBuilder:new{ accounts = self.accounts, reader = self }
+    require("rssreader_offline_sync").run(builder)
+end
+
+-- Offline Mode, automatic read-state sync: whatever was read offline goes
+-- to the server as soon as the device is back online. Deferred a little so
+-- whatever asked for the connection gets to use it first.
+function RSSReader:onNetworkConnected()
+    local OfflineSync = require("rssreader_offline_sync")
+    if not OfflineSync.isAuto() or OfflineSync.pendingCount() == 0 then
+        return
+    end
+    UIManager:scheduleIn(2, function()
+        local builder = MenuBuilder:new{ accounts = self.accounts, reader = self }
+        OfflineSync.autoSync(builder)
+    end)
 end
 
 function RSSReader:addToMainMenu(menu_items)
@@ -849,7 +906,8 @@ function RSSReader:openAdjacentArticle(only_unread)
     local stories = context and context.feed_node and context.feed_node._rss_stories
     local index
     for i, story in ipairs(stories or {}) do
-        if story_key and utils.storyUniqueKey(story) == story_key then
+        -- Offline stories carry the key their article was marked with.
+        if story_key and (story._rss_offline_key or utils.storyUniqueKey(story)) == story_key then
             index = i
             break
         end
@@ -873,7 +931,11 @@ function RSSReader:openAdjacentArticle(only_unread)
         })
         return
     end
-    builder:openStoryDocument(stories, next_index, context)
+    if context.open_story then
+        context.open_story(next_index)
+    else
+        builder:openStoryDocument(stories, next_index, context)
+    end
 end
 
 -- Leaving the list at root level while it sits on top of an article opened

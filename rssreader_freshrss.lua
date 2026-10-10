@@ -501,6 +501,42 @@ function FreshRSS:markStory(story, add_tag, remove_tag)
     return true
 end
 
+-- Offline Mode's read-state sync: edit-tag takes the i= parameter repeated,
+-- so one request covers up to 100 stories.
+function FreshRSS:markStoriesAsRead(stories, is_retry)
+    local ok, token = self:getEditToken()
+    if not ok then return false, token end
+
+    local ids = {}
+    for _, story in ipairs(stories or {}) do
+        local story_id = story and (story.id or story.story_id)
+        if story_id then
+            table.insert(ids, tostring(story_id))
+        end
+    end
+    for start = 1, #ids, 100 do
+        local parts = {
+            "client=" .. url.escape(USER_AGENT),
+            "T=" .. url.escape(token),
+            "a=" .. url.escape(READ_TAG),
+        }
+        for i = start, math.min(start + 99, #ids) do
+            table.insert(parts, "i=" .. url.escape(ids[i]))
+        end
+        local request_ok, err = self:authorizedRequest("POST", "/api/greader.php/reader/api/0/edit-tag", nil, table.concat(parts, "&"))
+        if not request_ok then
+            -- A stale token: fetch a new one and send everything again
+            -- (marking a story read twice is harmless).
+            if not is_retry and tostring(err):find("Token") then
+                self.token_cache = nil
+                return self:markStoriesAsRead(stories, true)
+            end
+            return false, err
+        end
+    end
+    return true
+end
+
 function FreshRSS:markStoryAsRead(feed_id, story)
     return self:markStory(story, READ_TAG, nil)
 end

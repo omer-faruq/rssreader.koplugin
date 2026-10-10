@@ -578,6 +578,29 @@ function CommaFeed:markStoryAsRead(feed_id, story)
     return self:performRestRequest("POST", "/entry/mark", nil, payload)
 end
 
+-- Offline Mode's read-state sync: /entry/markMultiple takes a list of the
+-- same requests /entry/mark does, 100 per call here.
+function CommaFeed:markStoriesAsRead(stories)
+    local requests = {}
+    for _, story in ipairs(stories or {}) do
+        local story_id = extractStoryId(story)
+        if story_id then
+            table.insert(requests, { id = toEntryIdValue(story_id), read = true })
+        end
+    end
+    for start = 1, #requests, 100 do
+        local batch = {}
+        for i = start, math.min(start + 99, #requests) do
+            table.insert(batch, requests[i])
+        end
+        local ok, err = self:performRestRequest("POST", "/entry/markMultiple", nil, { requests = batch })
+        if not ok then
+            return false, err
+        end
+    end
+    return true
+end
+
 function CommaFeed:markStoryAsUnread(feed_id, story)
     local story_id = extractStoryId(story)
     if not story_id then

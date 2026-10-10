@@ -1123,21 +1123,62 @@ function utils.fetchViaHttp(link, on_complete)
     end
 end
 
+-- Sanitizers that must not run in parallel workers: Diffbot's free plan
+-- allows about one call per 10 s (parallel calls only collect 429s), and
+-- FiveFilters on RapidAPI counts a monthly quota in a file that concurrent
+-- workers would race on. Returns the remaining sanitizers, and whether any
+-- were removed (then the plain page download is left to the parent too, so
+-- a story the safe ones cannot handle still gets the full chain).
+local WORKER_UNSAFE_SANITIZERS = {
+    diffbot = true,
+    fivefilters_rapidapi = true,
+}
+
+function utils.workerSafeSanitizers(sanitizers)
+    local safe, removed = {}, false
+    for _, entry in ipairs(sanitizers or {}) do
+        if WORKER_UNSAFE_SANITIZERS[(entry.type or ""):lower()] then
+            removed = true
+        else
+            table.insert(safe, entry)
+        end
+    end
+    return safe, removed
+end
+
+-- options.download_images: true/false overrides the
+-- download_images_when_sanitize_* config flags (Offline Mode's dialog choice).
+-- options.raw_content: HTML to use as the article instead of fetching the
+-- page; the sanitizers are skipped and only the image/EPUB steps run.
 function utils.fetchStoryContent(story, builder, on_complete, options)
+    options = options or {}
     local link = story and (story.permalink or story.href or story.link)
-    if not link or link == "" then
+    if (not link or link == "") and not options.raw_content then
         if on_complete then
             on_complete(nil, "missing_link")
         end
         return
     end
 
-    options = options or {}
     local silent = options.silent
     local external_progress_cb = options.progress_callback
 
-    NetworkMgr:runWhenOnline(function()
-        UIManager:nextTick(function()
+    -- options.worker: running inside a forked Offline Mode worker, which has
+    -- no UIManager loop: start right away, and stop at the article HTML (the
+    -- parent does the images and the EPUB). Rate-limited or metered
+    -- sanitizers are left to the parent too, see utils.workerSafeSanitizers.
+    local function start(work)
+        if options.worker then
+            work()
+        else
+            NetworkMgr:runWhenOnline(function()
+                UIManager:nextTick(work)
+            end)
+        end
+    end
+
+    start(function()
+        do
             local configured_sanitizers = utils.collectActiveSanitizers(builder)
             -- The feedbin entry only covers Feedbin stories, so it does not
             -- count as a configured sanitizer here.
@@ -1154,6 +1195,10 @@ function utils.fetchStoryContent(story, builder, on_complete, options)
                     configured_sanitizers = configured_sanitizers or {}
                     table.insert(configured_sanitizers, fallback_sanitizer)
                 end
+            end
+            local leave_original_to_parent = false
+            if options.worker then
+                configured_sanitizers, leave_original_to_parent = utils.workerSafeSanitizers(configured_sanitizers)
             end
 
             -- Cancellation flag shared across all phases. It is flipped
@@ -1312,6 +1357,12 @@ function utils.fetchStoryContent(story, builder, on_complete, options)
                     safeComplete(nil, "empty_content")
                     return
                 end
+                if options.worker then
+                    -- The parent finishes it: options.raw_content runs the
+                    -- steps below (URLs, heading, images, EPUB) there.
+                    safeComplete(raw_html, nil, { sanitized_successful = sanitized_successful and true or false })
+                    return
+                end
 
                 raw_html = utils.rewriteRelativeResourceUrls(raw_html, link)
                 raw_html = HtmlSanitizer.disableFontSizeDeclarations(raw_html)
@@ -1325,7 +1376,15 @@ function utils.fetchStoryContent(story, builder, on_complete, options)
                 end
 
                 local download_info
-                local images_requested = utils.shouldDownloadImages(builder, sanitized_successful)
+                local images_requested
+                if options.download_images ~= nil then
+                    images_requested = options.download_images and true or false
+                    if not images_requested then
+                        raw_html = utils.stripImages(raw_html)
+                    end
+                else
+                    images_requested = utils.shouldDownloadImages(builder, sanitized_successful)
+                end
                 local local_assets_map -- maps rewritten relative src -> absolute file path
                 if images_requested then
                     showProgress(_("Preparing images…"))
@@ -1395,6 +1454,12 @@ function utils.fetchStoryContent(story, builder, on_complete, options)
                     safeComplete(nil, "cancelled")
                     return
                 end
+                if leave_original_to_parent then
+                    -- A skipped sanitizer might still have worked: the
+                    -- parent runs the whole chain for this story.
+                    safeComplete(nil, "left_to_parent")
+                    return
+                end
                 showProgress(_("Downloading article…"))
                 utils.fetchViaHttp(link, function(content, err)
                     if not content then
@@ -1408,6 +1473,10 @@ function utils.fetchStoryContent(story, builder, on_complete, options)
             -- Run the actual work; called either directly (silent mode) or
             -- inside a Trapper.wrap coroutine (interactive mode).
             local function runWork()
+                if options.raw_content then
+                    finalizeContent(options.raw_content, true)
+                    return
+                end
                 if not configured_sanitizers or #configured_sanitizers == 0 then
                     handleOriginalDownload()
                     return
@@ -1597,7 +1666,7 @@ function utils.fetchStoryContent(story, builder, on_complete, options)
                     closeProgressWidget()
                 end)
             end
-        end)
+        end
     end)
 end
 
@@ -1732,6 +1801,60 @@ function utils.buildUniqueTargetPathWithExtension(directory, base_name, extensio
         counter = counter + 1
     end
     return candidate
+end
+
+-- Drops images (and the <picture> sources around them) from an article that
+-- is saved without them, so the reader shows no empty placeholders.
+function utils.stripImages(html)
+    if type(html) ~= "string" or html == "" then
+        return html
+    end
+    html = html:gsub("<[Ii][Mm][Gg][^>]*>", "")
+    html = html:gsub("<[Ss][Oo][Uu][Rr][Cc][Ee][^>]*>", "")
+    return html
+end
+
+-- Writes a story that fetchStoryContent returned into directory: an EPUB when
+-- its images were downloaded, plain HTML otherwise (or if the EPUB fails).
+-- Returns the written path, or nil. Cleans up the downloaded image folder
+-- either way, since the EPUB carries its own copies.
+function utils.saveFetchedStory(story, content, download_info, directory, log_tag)
+    local filename = utils.safeFilenameFromStory(story)
+    local metadata = type(download_info) == "table" and download_info or {}
+    local include_images = metadata.images_requested and true or false
+    local html_for_epub = metadata.html_for_epub
+    local should_create_epub = include_images and type(html_for_epub) == "string" and html_for_epub ~= ""
+    local assets_root = metadata.assets_root or (metadata.assets and metadata.assets.assets_root)
+
+    local saved_path
+    if should_create_epub and utils.EpubDownloadBackend then
+        local base_name = filename:gsub("%.html$", "")
+        local epub_path = utils.buildUniqueTargetPathWithExtension(directory, base_name, "epub")
+        local story_url = metadata.original_url or story.permalink or story.href or story.link or ""
+        local feed_title = story.feed_title or story.feedTitle
+        local local_assets = metadata.local_assets
+        local ok, result_or_err = pcall(function()
+            return utils.EpubDownloadBackend:createEpub(epub_path, html_for_epub, story_url, include_images, nil, nil, nil, feed_title, local_assets, utils.EpubDownloadBackend:storyMetadata(story))
+        end)
+        if ok and result_or_err ~= false then
+            saved_path = epub_path
+        else
+            logger.warn(log_tag or "RSSReader", "EPUB creation failed", result_or_err)
+        end
+    end
+
+    if not saved_path then
+        local target_path = utils.buildUniqueTargetPath(directory, filename)
+        local story_url_for_html = metadata.original_url or story.permalink or story.href or story.link or ""
+        if utils.writeStoryHtmlFile(content, target_path, utils.resolveStoryDocumentTitle(story), story_url_for_html) then
+            saved_path = target_path
+        end
+    end
+
+    if assets_root then
+        HtmlResources.cleanupAssets(assets_root)
+    end
+    return saved_path
 end
 
 function utils.triggerHoldCallback(_, item)

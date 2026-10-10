@@ -146,6 +146,48 @@ The tap action setting also applies to stories in the reading list:
 - **Open directly** – Opens the story immediately
 - **Save only** – Downloads the story to your save folder and removes it from the list
 
+## Offline Mode
+Download the stories of the feeds you choose in one go, then read them with Wi-Fi off. This is made for devices that are slow to get online. Open it from the **Offline** row of the account list; the number next to it is how many downloaded stories are still unread.
+
+### Choosing Feeds
+- **Offline** → **Choose feeds…** lists your accounts, local ones included. Open an account and its folders, and tap a feed to tick (✓) or untick it. Virtual feeds such as **★ All Unread**, FreshRSS's special feeds and CommaFeed tags can be picked too
+- Folders and accounts show how many feeds are ticked inside them
+- Long-press a folder to **Tick all feeds** or **Untick all feeds** in it, subfolders included. Tick all leaves out the folder's virtual feeds (★ All Feeds / ★ All Unread), which would only download the same stories twice
+- The selection is saved on every tap and kept for next time. **Selected feeds** lists everything ticked (tap one to untick it), and **Clear all** starts over
+- Picking from a remote account needs a connection, since its feed list is loaded from the server
+
+### Downloading
+**Download last selection** (in Offline) or **Download…** (in the picker) shows the options before starting. Tapping a row changes its value. Every row opens with the value you used last time:
+- **Stories per feed**: 5, 10, 20 or 50
+- **Only unread**: skip stories already read on the server, or read in Offline Mode
+- **Content**: *full article* goes through your sanitizers, like opening a story. *Feed text only* saves the text the feed itself carries: much faster, no page fetch, but some feeds only carry a summary
+- **Download images**: on or off. With images off, the article is saved without them
+- **Previous downloads**: *Delete all*, *Delete read only* or *Keep all*. Old stories are only deleted once the feed's new story list has loaded, so a feed that fails keeps what it had
+- **Turn Wi-Fi off when done** (devices that can toggle Wi-Fi)
+
+With *full article*, a feed's articles are first fetched three at a time in the background ("Fetching articles: 4 / 20"), then saved one by one with their images. Diffbot and FiveFilters on RapidAPI never run in parallel (Diffbot's free plan allows about one call per 10 seconds, and RapidAPI counts a monthly quota): a story that needs them is fetched afterwards, one at a time, through your whole sanitizer chain as usual. For the most speed, put Instaparser before Diffbot in your sanitizer order.
+
+The progress message shows the feed and story being downloaded; tap it to cancel. Whatever was already downloaded is kept.
+
+### Reading Offline
+- Tap a feed in **Offline** to see its downloaded stories (bold = unread), and tap a story to open it. It works without any connection
+- The way back from an article (button, Back key, end of the article) returns to this list, and **Next** opens the next downloaded story
+- Long-press a story to mark it read or unread, or delete it. Long-press a feed to mark all its stories read, delete all its downloads, or remove it from the selection
+
+### Syncing Read States
+Stories you read or mark in Offline Mode are marked on the server too:
+- **Read-state sync: automatic** (default): it happens when the device comes online, before a download, and before you open the account. It runs quietly and shows a short message. It asks first only when it would take more than 20 requests to the server
+- **Read-state sync: manual**: nothing is sent until you tap **Sync read states (N pending)** in Offline
+- Changes that could not be sent stay pending and are tried again next time
+- CommaFeed, FreshRSS, Miniflux, NewsBlur and Feedbin send up to 100 stories per request; Fever API sends one request per story
+- Local feeds need no sync: reading the downloaded copy marks the story read in the feed too
+
+### Gestures and Profiles
+Three actions can be assigned to a gesture or used in a Profile:
+- **RSS Reader: offline list** opens Offline Mode
+- **RSS Reader: download selected feeds** starts a download without the dialog, with the values used last time. Together with *Turn Wi-Fi off when done*, a single gesture connects, downloads and disconnects
+- **RSS Reader: sync offline read states** sends the pending read states
+
 ## Tap Action on Feed Items
 Configure what happens when you tap a story in the feed list:
 - Open **RSS Reader** → **Settings** → **Tap action on feed items**

@@ -15,6 +15,7 @@ NewsBlur.SUBSCRIPTION_ENDPOINT = "/reader/feeds"
 NewsBlur.STORIES_ENDPOINT = "/reader/feed"
 NewsBlur.MARK_READ_ENDPOINT = "/reader/mark_story_as_read"
 NewsBlur.MARK_UNREAD_ENDPOINT = "/reader/mark_story_as_unread"
+NewsBlur.MARK_HASHES_READ_ENDPOINT = "/reader/mark_story_hashes_as_read"
 NewsBlur.USER_AGENT = "KOReader RSSReader"
 
 local function requestWithScheme(options)
@@ -569,6 +570,32 @@ function NewsBlur:markStoryAsRead(feed_id, story)
         method = "POST",
         body = encodeForm(params),
     })
+end
+
+-- Offline Mode's read-state sync: story_hash repeated, 100 per request.
+function NewsBlur:markStoriesAsRead(stories)
+    local hashes = {}
+    for _, story in ipairs(stories or {}) do
+        local hash = story and (story.story_hash or story.hash)
+        if hash then
+            table.insert(hashes, tostring(hash))
+        end
+    end
+    for start = 1, #hashes, 100 do
+        local parts = {}
+        for i = start, math.min(start + 99, #hashes) do
+            table.insert(parts, "story_hash=" .. url.escape(hashes[i]))
+        end
+        local ok, err = self:authorizedRequest({
+            url = self.BASE_URL .. self.MARK_HASHES_READ_ENDPOINT,
+            method = "POST",
+            body = table.concat(parts, "&"),
+        })
+        if not ok then
+            return false, err
+        end
+    end
+    return true
 end
 
 function NewsBlur:markStoryAsUnread(feed_id, story)

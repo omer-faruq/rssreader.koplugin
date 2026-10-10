@@ -670,6 +670,21 @@ function Feedbin:markIdsAsRead(ids)
     return self:sendIdBatches("/v2/unread_entries/delete.json", "unread_entries", ids)
 end
 
+-- Offline Mode's read-state sync: many stories in as few requests as possible.
+function Feedbin:markStoriesAsRead(stories)
+    local ids = {}
+    for _, story in ipairs(stories or {}) do
+        local id = storyIdNumber(story)
+        if id then
+            table.insert(ids, id)
+        end
+    end
+    if #ids == 0 then
+        return true
+    end
+    return self:markIdsAsRead(ids)
+end
+
 function Feedbin:markStoryAsRead(feed_id, story)
     local id = storyIdNumber(story)
     if not id then
