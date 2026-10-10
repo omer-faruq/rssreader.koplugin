@@ -643,9 +643,7 @@ function backends.showNewsBlurFeed(self, account, client, feed_node, opts)
     local function finalizeMenu()
         local stories = feed_node._rss_stories or {}
         if #stories == 0 then
-            UIManager:show(InfoMessage:new{
-                text = _("No stories available."),
-            })
+            utils.showNoStories(self.reader, feed_node)
             return
         end
 
@@ -783,10 +781,8 @@ function backends.showNewsBlurFeed(self, account, client, feed_node, opts)
             end
             if #batch == 0 then
                 if fetch_page == 1 and #feed_node._rss_stories == 0 then
-                    UIManager:show(InfoMessage:new{
-                        text = _("No stories available."),
-                    })
                     feed_node._rss_has_more = false
+                    utils.showNoStories(self.reader, feed_node)
                     return
                 end
                 feed_node._rss_has_more = false
@@ -1046,9 +1042,7 @@ function backends.showCommaFeedFeed(self, account, client, feed_node, opts)
     local function finalizeMenu()
         local stories = feed_node._rss_stories or {}
         if #stories == 0 then
-            UIManager:show(InfoMessage:new{
-                text = _("No stories available."),
-            })
+            utils.showNoStories(self.reader, feed_node)
             return
         end
 
@@ -1185,10 +1179,8 @@ function backends.showCommaFeedFeed(self, account, client, feed_node, opts)
             end
             if #batch == 0 then
                 if fetch_page == 1 and #feed_node._rss_stories == 0 then
-                    UIManager:show(InfoMessage:new{
-                        text = _("No stories available."),
-                    })
                     feed_node._rss_has_more = false
+                    utils.showNoStories(self.reader, feed_node)
                     return
                 end
                 feed_node._rss_has_more = false
@@ -1467,9 +1459,7 @@ function backends.showFreshRSSFeed(self, account, client, feed_node, opts)
     local function finalizeMenu()
         local stories = feed_node._rss_stories or {}
         if #stories == 0 then
-            UIManager:show(InfoMessage:new{
-                text = _("No stories available."),
-            })
+            utils.showNoStories(self.reader, feed_node)
             return
         end
 
@@ -1628,10 +1618,8 @@ function backends.showFreshRSSFeed(self, account, client, feed_node, opts)
             end
             if #batch == 0 then
                 if fetch_page == 1 and #feed_node._rss_stories == 0 then
-                    UIManager:show(InfoMessage:new{
-                        text = _("No stories available."),
-                    })
                     feed_node._rss_has_more = false
+                    utils.showNoStories(self.reader, feed_node)
                     return
                 end
                 feed_node._rss_has_more = false
@@ -1770,9 +1758,7 @@ function backends.showFeverFeed(self, account, client, feed_node, opts)
     local function finalizeMenu()
         local stories = feed_node._rss_stories or {}
         if #stories == 0 then
-            UIManager:show(InfoMessage:new{
-                text = _("No stories available."),
-            })
+            utils.showNoStories(self.reader, feed_node)
             return
         end
 
@@ -2025,9 +2011,7 @@ function backends.showMinifluxFeed(self, account, client, feed_node, opts)
     local function finalizeMenu()
         local stories = feed_node._rss_stories or {}
         if #stories == 0 then
-            UIManager:show(InfoMessage:new{
-                text = _("No stories available."),
-            })
+            utils.showNoStories(self.reader, feed_node)
             return
         end
 
@@ -2280,9 +2264,7 @@ function backends.showFeedbinFeed(self, account, client, feed_node, opts)
     local function finalizeMenu()
         local stories = feed_node._rss_stories or {}
         if #stories == 0 then
-            UIManager:show(InfoMessage:new{
-                text = _("No stories available."),
-            })
+            utils.showNoStories(self.reader, feed_node)
             return
         end
 

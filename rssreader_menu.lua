@@ -1751,9 +1751,7 @@ function MenuBuilder:showLocalFeed(feed, opts)
     local function finalizeMenu()
         local stories = feed_node._rss_stories or {}
         if #stories == 0 then
-            UIManager:show(InfoMessage:new{
-                text = _("No stories available."),
-            })
+            utils.showNoStories(self.reader, feed_node)
             return
         end
 
@@ -1882,9 +1880,7 @@ function MenuBuilder:showLocalFeed(feed, opts)
             items = {}
         end
         if #items == 0 then
-            UIManager:show(InfoMessage:new{
-                text = _("No stories available."),
-            })
+            utils.showNoStories(self.reader, feed_node)
             return
         end
 

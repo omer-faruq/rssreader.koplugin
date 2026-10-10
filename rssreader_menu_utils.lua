@@ -673,6 +673,40 @@ function utils.persistFeedState(menu_instance, feed_node)
     end
 end
 
+-- A feed came back empty (e.g. All Unread after its last story was read).
+-- Tapped from its folder, the folder stays up under the message. But a feed
+-- list restored on its own (Back to RSS list, reopening the plugin) or
+-- refreshed in place would leave nothing, or a stale list, on screen: step
+-- back to where it was opened from instead. Either way forget the feed's
+-- saved state, so the next open does not restore the empty feed again.
+function utils.showNoStories(reader, feed_node)
+    if type(reader) == "table" then
+        if feed_node and type(reader.clearFeedState) == "function" then
+            local account_name = feed_node._account_name or "unknown"
+            reader:clearFeedState(account_name, feed_node.id)
+            if type(reader.getFeedKey) == "function"
+                    and reader.last_feed_key == reader:getFeedKey(account_name, feed_node.id) then
+                reader.last_feed_key = nil
+            end
+        end
+        local menu = reader.current_menu_info and reader.current_menu_info.menu
+        local shown = menu and UIManager:isWidgetShown(menu)
+        if not shown or (feed_node and menu._rss_feed_node == feed_node) then
+            if reader.history and #reader.history > 0 and type(reader.goBack) == "function" then
+                reader:goBack()
+            elseif not shown and type(reader.root_reopen) == "function" then
+                reader.root_reopen()
+            end
+        elseif type(reader.saveNavigationState) == "function" then
+            reader:saveNavigationState()
+        end
+    end
+    -- After the step back, so the menu it shows does not cover the message.
+    UIManager:show(InfoMessage:new{
+        text = _("No stories available."),
+    })
+end
+
 function utils.trackMenuPage(menu_instance, feed_node)
     if not menu_instance then
         return
