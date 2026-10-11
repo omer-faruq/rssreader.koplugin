@@ -17,6 +17,7 @@ local HtmlResources = require("rssreader_html_resources")
 local FiveFiltersSanitizer = require("sanitizers/rssreader_sanitizer_fivefilters")
 local DiffbotSanitizer = require("sanitizers/rssreader_sanitizer_diffbot")
 local InstaparserSanitizer = require("sanitizers/rssreader_sanitizer_instaparser")
+local InstapaperSanitizer = require("sanitizers/rssreader_sanitizer_instapaper")
 local FeedbinSanitizer = require("sanitizers/rssreader_sanitizer_feedbin")
 local SanitizerQuota = require("sanitizers/rssreader_sanitizer_quota")
 local Trapper = require("ui/trapper")
@@ -858,6 +859,7 @@ local SANITIZER_LABELS = {
     fivefilters_rapidapi = "FiveFilters (RapidAPI)",
     diffbot = "Diffbot",
     instaparser = "Instaparser",
+    instapaper = "Instapaper",
     feedbin = "Feedbin",
 }
 
@@ -1659,6 +1661,19 @@ function utils.fetchStoryContent(story, builder, on_complete, options)
 
                             finalizeContent(instaparser_html, true)
                         end)
+                    elseif sanitizer_type == "instapaper" then
+                        InstapaperSanitizer.fetchArticle(sanitizer, link, function(instapaper_html, err)
+                            if cancelled then
+                                safeComplete(nil, "cancelled")
+                                return
+                            end
+                            if not instapaper_html or not InstapaperSanitizer.contentIsMeaningful(instapaper_html) then
+                                processSanitizer(index + 1)
+                                return
+                            end
+
+                            finalizeContent(instapaper_html, true)
+                        end, { title = story and story.title })
                     elseif sanitizer_type == "feedbin" then
                         FeedbinSanitizer.fetchArticle(feedbin_url, function(content, err)
                             if cancelled then

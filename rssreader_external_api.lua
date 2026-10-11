@@ -25,6 +25,7 @@ local function loadRSSReaderConfig()
             { type = "fivefilters_rapidapi", active = false, order = 2 },
             { type = "diffbot", active = false, order = 3 },
             { type = "instaparser", active = false, order = 4 },
+            { type = "instapaper", active = false, order = 5 },
         },
         features = {}
     }

@@ -82,7 +82,7 @@ return {
             active = false, -- set to true to enable this account
         },
     },
-    sanitizers = { -- available types = feedbin, fivefilters, fivefilters_rapidapi, diffbot, instaparser
+    sanitizers = { -- available types = feedbin, fivefilters, fivefilters_rapidapi, diffbot, instaparser, instapaper
         {
             -- Feedbin's own full-article extraction. Free and needs no token,
             -- but only applies to stories from a Feedbin account; other
@@ -130,6 +130,18 @@ return {
             active = false,
             token = "your_instaparser_token", -- get your token here: https://instaparser.com/
             seconds_between_calls = 2, -- spacing between calls, shared by parallel downloads (Trial plan: max 1 call/s; 0 = no limit)
+        },
+        {
+            -- Instapaper's own parser: each article is saved to your Instapaper
+            -- account, its parsed text read back, and the bookmark deleted again
+            -- (links already in the account are left alone). Best used with a
+            -- separate Instapaper account kept for this.
+            order = 5,
+            type = "instapaper",
+            active = false,
+            -- personal access token: https://www.instapaper.com/developers/applications
+            token = "your_instapaper_access_token",
+            seconds_between_calls = 2, -- spacing between articles, shared by parallel downloads (0 = no limit)
         },
     },
     features = {

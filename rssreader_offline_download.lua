@@ -261,7 +261,7 @@ end
 -- like HtmlResources does with images. A worker only fetches the article
 -- HTML (into <dir>/<index>.html); images and the EPUB stay in this process,
 -- one story at a time, so worker counts never multiply on a small device.
--- Instaparser calls stay spaced across workers (RateLimit time slots).
+-- Instaparser and Instapaper calls stay spaced across workers (RateLimit time slots).
 -- Diffbot and FiveFilters-RapidAPI never run in workers
 -- (utils.workerSafeSanitizers): a story that needs them is left without a
 -- file, and the sequential pass runs the whole chain for it as before.
